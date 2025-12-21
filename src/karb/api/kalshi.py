@@ -1,8 +1,10 @@
 """Kalshi API client for cross-platform arbitrage."""
 
 import asyncio
+import tempfile
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Optional
 
 from karb.config import get_settings
@@ -110,20 +112,30 @@ class KalshiClient:
     ) -> list[KalshiMarket]:
         """Get markets, optionally filtered by event."""
         def _sync():
-            client = self._get_client()
-            kwargs = {"status": status, "limit": limit}
-            if event_ticker:
-                kwargs["event_ticker"] = event_ticker
-
-            # Use raw API call to avoid SDK model validation issues
             import requests
-            from kalshi_python.auth import KalshiAuth
+            from kalshi_python.api_client import KalshiAuth
 
-            auth = KalshiAuth(client.configuration)
-            url = f"{client.configuration.host}/markets"
-            resp = requests.get(url, params=kwargs, auth=auth)
-            resp.raise_for_status()
-            return resp.json().get("markets", [])
+            client = self._get_client()
+
+            # Write private key to temp file for SDK auth
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False) as f:
+                f.write(client.private_key_pem)
+                key_path = f.name
+
+            try:
+                auth = KalshiAuth(client.api_key_id, key_path)
+
+                params = {"limit": limit, "status": status}
+                if event_ticker:
+                    params["event_ticker"] = event_ticker
+
+                url = f"{self._base_url}/markets"
+                headers = auth.create_auth_headers("GET", "/markets")
+                resp = requests.get(url, params=params, headers=headers)
+                resp.raise_for_status()
+                return resp.json().get("markets", [])
+            finally:
+                Path(key_path).unlink(missing_ok=True)
 
         raw_markets = await asyncio.to_thread(_sync)
 
