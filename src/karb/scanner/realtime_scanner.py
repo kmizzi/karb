@@ -84,7 +84,7 @@ class RealtimeScanner:
         self,
         on_arbitrage: Optional[ArbitrageCallback] = None,
         min_liquidity: float = 1000.0,
-        max_markets: int = 400,  # Leave room under 500 limit (2 tokens per market)
+        max_markets: int = 250,  # 250 markets * 2 tokens = 500 (WebSocket limit)
     ) -> None:
         settings = get_settings()
 
@@ -141,6 +141,9 @@ class RealtimeScanner:
 
     async def subscribe_to_markets(self) -> None:
         """Subscribe to WebSocket updates for all loaded markets."""
+        # Clear old subscriptions for fresh start
+        self.ws_client._subscribed_assets.clear()
+
         # Collect all token IDs (YES and NO for each market)
         token_ids = []
         for market in self._markets.values():
@@ -247,28 +250,56 @@ class RealtimeScanner:
         # Load markets
         await self.load_markets()
 
-        # Connect to WebSocket
-        await self.ws_client.connect()
-
-        # Subscribe to all markets
-        await self.subscribe_to_markets()
-
-        # Run WebSocket listener with periodic market refresh
+        # Run WebSocket with auto-reconnection, plus periodic tasks
         await asyncio.gather(
-            self.ws_client.listen(),
+            self._run_websocket_with_reconnect(),
             self._periodic_market_refresh(),
             self._periodic_stats(),
         )
 
-    async def _periodic_market_refresh(self, interval: float = 300) -> None:
-        """Periodically refresh market list."""
+    async def _run_websocket_with_reconnect(self) -> None:
+        """Run WebSocket with automatic reconnection."""
+        while self._running:
+            try:
+                # Connect
+                await self.ws_client.connect()
+
+                # Subscribe to all markets
+                await self.subscribe_to_markets()
+
+                # Listen until disconnected
+                await self.ws_client.listen()
+
+            except Exception as e:
+                log.error("WebSocket error", error=str(e))
+
+            if not self._running:
+                break
+
+            # Reconnect with backoff
+            delay = min(self.ws_client._reconnect_delay, 30)
+            log.info("Reconnecting WebSocket", delay=delay)
+            await asyncio.sleep(delay)
+            self.ws_client._reconnect_delay = min(delay * 2, 60)
+
+    async def _periodic_market_refresh(self, interval: float = 600) -> None:
+        """Periodically refresh market list (every 10 min)."""
         while self._running:
             await asyncio.sleep(interval)
 
             try:
                 log.info("Refreshing market list...")
+                old_count = len(self._markets)
                 await self.load_markets()
-                await self.subscribe_to_markets()
+                new_count = len(self._markets)
+
+                # Only resubscribe if markets changed significantly
+                if abs(new_count - old_count) > 10:
+                    log.info("Market list changed, reconnecting WebSocket")
+                    # Clear subscriptions and let reconnect loop handle it
+                    self.ws_client._subscribed_assets.clear()
+                    if self.ws_client._ws:
+                        await self.ws_client._ws.close()
             except Exception as e:
                 log.error("Market refresh error", error=str(e))
 
