@@ -257,6 +257,159 @@ def orderbook(token_id: str) -> None:
     asyncio.run(_orderbook())
 
 
+@cli.command()
+@click.option("--dry-run/--live", default=True, help="Dry run mode")
+@click.option("--poll-interval", type=float, default=30.0, help="Seconds between scans")
+@click.option("--min-spread", type=float, default=0.02, help="Minimum spread (e.g., 0.02 for 2%)")
+@click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]), default="INFO")
+def crossplatform(
+    dry_run: bool,
+    poll_interval: float,
+    min_spread: float,
+    log_level: str,
+) -> None:
+    """Run cross-platform arbitrage scanner (Polymarket vs Kalshi)."""
+    import os
+
+    if dry_run is not None:
+        os.environ["DRY_RUN"] = str(dry_run).lower()
+
+    reload_settings()
+    setup_logging(log_level)
+
+    settings = get_settings()
+
+    mode = "[yellow]DRY RUN[/yellow]" if settings.dry_run else "[red]LIVE TRADING[/red]"
+    console.print(f"\n[bold]Cross-Platform Arbitrage Scanner[/bold] - {mode}")
+    console.print(f"[bold]Platforms:[/bold] Polymarket + Kalshi\n")
+
+    # Check credentials
+    if not settings.is_kalshi_enabled():
+        console.print(
+            "[red]Error:[/red] Kalshi credentials not configured.\n"
+            "Set KALSHI_API_KEY and KALSHI_PRIVATE_KEY in your .env file."
+        )
+        sys.exit(1)
+
+    console.print(f"[dim]Poll interval:[/dim] {poll_interval}s")
+    console.print(f"[dim]Min spread:[/dim] {min_spread * 100:.1f}%")
+    console.print()
+
+    async def _run() -> None:
+        from karb.scanner.crossplatform_scanner import CrossPlatformScanner
+
+        async with CrossPlatformScanner(
+            poll_interval=poll_interval,
+            min_spread=min_spread,
+        ) as scanner:
+            await scanner.run()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted[/yellow]")
+
+
+@cli.command()
+def kalshi_test() -> None:
+    """Test Kalshi API connection."""
+    setup_logging("INFO")
+
+    async def _test() -> None:
+        from karb.api.kalshi import KalshiClient
+
+        console.print("[bold]Testing Kalshi API connection...[/bold]\n")
+
+        settings = get_settings()
+        if not settings.is_kalshi_enabled():
+            console.print("[red]Error:[/red] Kalshi credentials not configured.")
+            return
+
+        async with KalshiClient() as client:
+            try:
+                # Test balance
+                balance = await client.get_balance()
+                console.print(f"[green]✓[/green] Connected to Kalshi")
+                console.print(f"[dim]Account balance:[/dim] ${float(balance):.2f}\n")
+
+                # Fetch some markets
+                markets = await client.get_markets(limit=10)
+                console.print(f"[dim]Found {len(markets)} open markets[/dim]\n")
+
+                if markets:
+                    table = Table(title="Sample Kalshi Markets")
+                    table.add_column("Ticker", style="cyan")
+                    table.add_column("Title", max_width=40)
+                    table.add_column("YES Bid", justify="right")
+                    table.add_column("YES Ask", justify="right")
+
+                    for m in markets[:10]:
+                        table.add_row(
+                            m.ticker,
+                            m.title[:40],
+                            f"${float(m.yes_bid):.2f}" if m.yes_bid else "-",
+                            f"${float(m.yes_ask):.2f}" if m.yes_ask else "-",
+                        )
+
+                    console.print(table)
+
+            except Exception as e:
+                console.print(f"[red]✗ Connection failed:[/red] {e}")
+
+    asyncio.run(_test())
+
+
+@cli.command()
+def crossplatform_scan() -> None:
+    """Run a single cross-platform scan."""
+    setup_logging("INFO")
+
+    async def _scan() -> None:
+        from karb.scanner.crossplatform_scanner import CrossPlatformScanner
+
+        console.print("[bold]Running cross-platform scan...[/bold]\n")
+
+        settings = get_settings()
+        if not settings.is_kalshi_enabled():
+            console.print("[red]Error:[/red] Kalshi credentials not configured.")
+            return
+
+        async with CrossPlatformScanner() as scanner:
+            opportunities = await scanner.scan_once()
+
+            stats = scanner.get_stats()
+            console.print(f"[dim]Polymarket markets:[/dim] {stats['poly_markets']}")
+            console.print(f"[dim]Kalshi markets:[/dim] {stats['kalshi_markets']}")
+            console.print(f"[dim]Matched events:[/dim] {stats['matched_events']}")
+            console.print()
+
+            if not opportunities:
+                console.print("[yellow]No cross-platform arbitrage opportunities found[/yellow]")
+                return
+
+            table = Table(title="Cross-Platform Opportunities")
+            table.add_column("Polymarket", style="cyan", max_width=30)
+            table.add_column("Kalshi", style="magenta")
+            table.add_column("Poly Price", justify="right")
+            table.add_column("Kalshi Price", justify="right")
+            table.add_column("Spread", justify="right", style="green")
+            table.add_column("Direction", max_width=20)
+
+            for opp in opportunities:
+                table.add_row(
+                    opp.match.polymarket.question[:30],
+                    opp.match.kalshi.ticker,
+                    f"${float(opp.poly_price):.2f}",
+                    f"${float(opp.kalshi_price):.2f}",
+                    f"{float(opp.spread_pct) * 100:.1f}%",
+                    opp.direction.replace("_", " "),
+                )
+
+            console.print(table)
+
+    asyncio.run(_scan())
+
+
 def main() -> None:
     """Main entry point."""
     cli()

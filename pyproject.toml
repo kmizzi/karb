@@ -23,6 +23,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "click>=8.0.0",
     "rich>=13.0.0",
+    "kalshi-python>=2.1.0",
 ]
 
 [project.optional-dependencies]

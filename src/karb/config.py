@@ -70,6 +70,20 @@ class Settings(BaseSettings):
         description="Polymarket Gamma API base URL",
     )
 
+    # Kalshi Configuration
+    kalshi_api_key: Optional[str] = Field(
+        default=None,
+        description="Kalshi API key ID",
+    )
+    kalshi_private_key: Optional[SecretStr] = Field(
+        default=None,
+        description="Kalshi RSA private key (PEM format)",
+    )
+    kalshi_base_url: str = Field(
+        default="https://api.elections.kalshi.com/trade-api/v2",
+        description="Kalshi API base URL",
+    )
+
     # Alerts (optional)
     telegram_bot_token: Optional[str] = Field(
         default=None,
@@ -113,8 +127,12 @@ class Settings(BaseSettings):
         return v
 
     def is_trading_enabled(self) -> bool:
-        """Check if trading credentials are configured."""
+        """Check if Polymarket trading credentials are configured."""
         return self.private_key is not None and self.wallet_address is not None
+
+    def is_kalshi_enabled(self) -> bool:
+        """Check if Kalshi credentials are configured."""
+        return self.kalshi_api_key is not None and self.kalshi_private_key is not None
 
 
 # Global settings instance
