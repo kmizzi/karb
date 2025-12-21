@@ -92,24 +92,23 @@ class Settings(BaseSettings):
         description="Logging level (DEBUG, INFO, WARNING, ERROR)",
     )
 
-    @field_validator("wallet_address")
+    @field_validator("wallet_address", mode="before")
     @classmethod
     def validate_wallet_address(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
+        if v is None or v == "":
             return None
         if not v.startswith("0x") or len(v) != 42:
             raise ValueError("Wallet address must be a valid Ethereum address (0x + 40 hex chars)")
         return v.lower()
 
-    @field_validator("private_key")
+    @field_validator("private_key", mode="before")
     @classmethod
-    def validate_private_key(cls, v: Optional[SecretStr]) -> Optional[SecretStr]:
-        if v is None:
+    def validate_private_key(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
             return None
-        key = v.get_secret_value()
-        if not key.startswith("0x"):
+        if not v.startswith("0x"):
             raise ValueError("Private key must start with 0x")
-        if len(key) != 66:  # 0x + 64 hex chars
+        if len(v) != 66:  # 0x + 64 hex chars
             raise ValueError("Private key must be 32 bytes (64 hex chars + 0x prefix)")
         return v
 
