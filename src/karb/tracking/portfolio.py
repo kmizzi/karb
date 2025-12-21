@@ -43,14 +43,20 @@ class PortfolioTracker:
             "total_usd": 0.0,
         }
 
-        # Get Polymarket USDC balance
+        # Get Polymarket USDC balance (on-chain on Polygon)
         if settings.wallet_address:
             try:
-                from karb.api.clob import ClobClient
-                async with ClobClient() as client:
-                    # Get USDC balance from the CLOB
-                    balance_info = await client.get_balance()
-                    balances["polymarket_usdc"] = float(balance_info.get("balance", 0))
+                from web3 import Web3
+
+                # USDC on Polygon
+                USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                USDC_ABI = [{"constant":True,"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":True,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]
+
+                w3 = Web3(Web3.HTTPProvider(settings.polygon_rpc_url))
+                usdc = w3.eth.contract(address=Web3.to_checksum_address(USDC_ADDRESS), abi=USDC_ABI)
+
+                raw_balance = usdc.functions.balanceOf(Web3.to_checksum_address(settings.wallet_address)).call()
+                balances["polymarket_usdc"] = raw_balance / 1e6  # USDC has 6 decimals
             except Exception as e:
                 log.debug("Failed to get Polymarket balance", error=str(e))
 
