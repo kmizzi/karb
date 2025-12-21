@@ -211,17 +211,23 @@ def create_app() -> FastAPI:
 
         # Fetch fresh data
         try:
-            import os
             from karb.api.gamma import GammaClient
             from karb.api.kalshi import KalshiClient
 
             # Use LLM matcher if API key is available, otherwise fall back to fuzzy
-            use_llm = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
-            if use_llm:
+            provider = settings.llm_provider
+            if provider == "anthropic" and settings.anthropic_api_key:
                 from karb.matcher.llm_matcher import LLMMatcher
-                provider = os.environ.get("LLM_PROVIDER", "anthropic")
-                matcher = LLMMatcher(provider=provider)
-                log.info("Using LLM matcher", provider=provider)
+                matcher = LLMMatcher(provider="anthropic", api_key=settings.anthropic_api_key)
+                log.info("Using LLM matcher", provider="anthropic")
+            elif provider == "openai" and settings.openai_api_key:
+                from karb.matcher.llm_matcher import LLMMatcher
+                matcher = LLMMatcher(provider="openai", api_key=settings.openai_api_key)
+                log.info("Using LLM matcher", provider="openai")
+            elif provider == "gemini" and settings.google_api_key:
+                from karb.matcher.llm_matcher import LLMMatcher
+                matcher = LLMMatcher(provider="gemini", api_key=settings.google_api_key)
+                log.info("Using LLM matcher", provider="gemini")
             else:
                 from karb.matcher.event_matcher import EventMatcher
                 matcher = EventMatcher(min_confidence=0.5)
