@@ -214,6 +214,9 @@ def create_app() -> FastAPI:
             from karb.api.gamma import GammaClient
             from karb.api.kalshi import KalshiClient
 
+            # Load settings for LLM config
+            settings = get_settings()
+
             # Use LLM matcher if API key is available, otherwise fall back to fuzzy
             provider = settings.llm_provider
             if provider == "anthropic" and settings.anthropic_api_key:
