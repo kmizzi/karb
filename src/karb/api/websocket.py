@@ -187,6 +187,20 @@ class WebSocketClient:
         """Handle incoming WebSocket message."""
         data = json.loads(raw_message)
 
+        # Messages can come as arrays (batch) or single objects
+        if isinstance(data, list):
+            for item in data:
+                await self._process_event(item)
+            return
+
+        await self._process_event(data)
+
+    async def _process_event(self, data: dict) -> None:
+        """Process a single event from WebSocket."""
+        if not isinstance(data, dict):
+            log.debug("Skipping non-dict message", type=type(data).__name__)
+            return
+
         # Handle different event types
         event_type = data.get("event_type")
 
