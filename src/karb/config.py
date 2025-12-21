@@ -124,6 +124,24 @@ class Settings(BaseSettings):
         description="Logging level (DEBUG, INFO, WARNING, ERROR)",
     )
 
+    # LLM Configuration (for AI-powered market matching)
+    llm_provider: str = Field(
+        default="anthropic",
+        description="LLM provider for market matching (anthropic, openai, gemini)",
+    )
+    anthropic_api_key: Optional[str] = Field(
+        default=None,
+        description="Anthropic API key for Claude",
+    )
+    openai_api_key: Optional[str] = Field(
+        default=None,
+        description="OpenAI API key",
+    )
+    google_api_key: Optional[str] = Field(
+        default=None,
+        description="Google API key for Gemini",
+    )
+
     @field_validator("wallet_address", mode="before")
     @classmethod
     def validate_wallet_address(cls, v: Optional[str]) -> Optional[str]:
