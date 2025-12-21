@@ -24,12 +24,14 @@ def cli() -> None:
 
 @cli.command()
 @click.option("--dry-run/--live", default=True, help="Dry run mode (no real trades)")
-@click.option("--poll-interval", type=float, help="Seconds between scans")
+@click.option("--realtime/--polling", default=True, help="Use real-time WebSocket (default) or legacy polling")
+@click.option("--poll-interval", type=float, help="Seconds between scans (polling mode only)")
 @click.option("--min-profit", type=float, help="Minimum profit threshold (e.g., 0.005 for 0.5%)")
 @click.option("--max-position", type=float, help="Maximum position size in USD")
 @click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]), default="INFO")
 def run(
     dry_run: bool,
+    realtime: bool,
     poll_interval: Optional[float],
     min_profit: Optional[float],
     max_position: Optional[float],
@@ -56,7 +58,9 @@ def run(
     settings = get_settings()
 
     mode = "[yellow]DRY RUN[/yellow]" if settings.dry_run else "[red]LIVE TRADING[/red]"
-    console.print(f"\n[bold]Karb Arbitrage Bot[/bold] - {mode}\n")
+    engine = "[cyan]REAL-TIME WebSocket[/cyan]" if realtime else "[dim]Legacy Polling[/dim]"
+    console.print(f"\n[bold]Karb Arbitrage Bot[/bold] - {mode}")
+    console.print(f"[bold]Engine:[/bold] {engine}\n")
 
     if not settings.dry_run:
         if not settings.private_key or not settings.wallet_address:
@@ -68,15 +72,19 @@ def run(
 
         console.print(f"[dim]Wallet:[/dim] {settings.wallet_address}")
 
-    console.print(f"[dim]Poll interval:[/dim] {settings.poll_interval_seconds}s")
+    if not realtime:
+        console.print(f"[dim]Poll interval:[/dim] {settings.poll_interval_seconds}s")
     console.print(f"[dim]Min profit:[/dim] {settings.min_profit_threshold * 100:.1f}%")
     console.print(f"[dim]Max position:[/dim] ${settings.max_position_size}")
     console.print()
 
-    from karb.bot import run_bot
-
     try:
-        asyncio.run(run_bot())
+        if realtime:
+            from karb.bot import run_realtime_bot
+            asyncio.run(run_realtime_bot())
+        else:
+            from karb.bot import run_bot
+            asyncio.run(run_bot())
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/yellow]")
 

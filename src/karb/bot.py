@@ -215,9 +215,148 @@ class ArbitrageBot:
 
 
 async def run_bot() -> None:
-    """Entry point for running the bot."""
+    """Entry point for running the bot (legacy polling mode)."""
     settings = get_settings()
     setup_logging(settings.log_level)
 
     async with ArbitrageBot() as bot:
+        await bot.run()
+
+
+class RealtimeArbitrageBot:
+    """
+    Real-time arbitrage bot using WebSocket streaming.
+
+    This is the fast version that reacts to price changes instantly
+    instead of polling.
+    """
+
+    def __init__(self) -> None:
+        from karb.scanner.realtime_scanner import RealtimeScanner
+
+        settings = get_settings()
+
+        self.scanner = RealtimeScanner(
+            on_arbitrage=self._on_arbitrage,
+            min_liquidity=settings.min_liquidity_usd,
+        )
+        self.executor = OrderExecutor()
+
+        self.stats = BotStats()
+        self._running = False
+        self._execution_lock = asyncio.Lock()
+
+    async def _on_arbitrage(self, alert) -> None:
+        """Handle arbitrage alert from scanner."""
+        from karb.api.models import ArbitrageOpportunity
+        from karb.scanner.realtime_scanner import ArbitrageAlert
+
+        alert: ArbitrageAlert = alert
+        settings = get_settings()
+
+        self.stats.opportunities_found += 1
+
+        # Convert alert to opportunity
+        opportunity = ArbitrageOpportunity(
+            market=alert.market,
+            yes_ask=alert.yes_ask,
+            no_ask=alert.no_ask,
+            combined_cost=alert.combined_cost,
+            profit_pct=alert.profit_pct,
+            max_trade_size=Decimal(str(settings.max_position_size)),
+        )
+
+        # Execute immediately (with lock to prevent concurrent executions)
+        async with self._execution_lock:
+            try:
+                result = await self.executor.execute(opportunity)
+
+                self.stats.trades_executed += 1
+                if result.status == ExecutionStatus.FILLED:
+                    self.stats.trades_successful += 1
+                    self.stats.total_profit += result.expected_profit
+
+                    log.info(
+                        "Trade executed successfully",
+                        market=alert.market.question[:30],
+                        profit=f"${float(result.expected_profit):.2f}",
+                    )
+
+            except Exception as e:
+                log.error(
+                    "Execution error",
+                    market=alert.market.question[:30],
+                    error=str(e),
+                )
+
+    async def run(self) -> None:
+        """Run the real-time bot."""
+        settings = get_settings()
+        self._running = True
+
+        mode = "DRY RUN" if settings.dry_run else "LIVE"
+        log.info(
+            f"Starting REAL-TIME arbitrage bot [{mode}]",
+            min_profit=f"{settings.min_profit_threshold * 100:.1f}%",
+            max_position=f"${settings.max_position_size}",
+        )
+
+        if not settings.dry_run and not self.executor.signer.is_configured:
+            log.warning(
+                "Trading credentials not configured. "
+                "Set PRIVATE_KEY and WALLET_ADDRESS in .env for live trading."
+            )
+
+        try:
+            await self.scanner.run()
+        except asyncio.CancelledError:
+            log.info("Bot cancelled")
+        finally:
+            await self.shutdown()
+
+    def stop(self) -> None:
+        """Stop the bot."""
+        log.info("Stopping bot...")
+        self._running = False
+        self.scanner.stop()
+
+    async def shutdown(self) -> None:
+        """Clean shutdown."""
+        log.info("Shutting down...")
+        self.stop()
+        await self.scanner.close()
+        await self.executor.close()
+        self._log_stats()
+
+    def _log_stats(self) -> None:
+        """Log statistics."""
+        runtime = datetime.utcnow() - self.stats.started_at
+        hours = runtime.total_seconds() / 3600
+
+        scanner_stats = self.scanner.get_stats()
+
+        log.info(
+            "Bot statistics",
+            runtime=f"{hours:.1f}h",
+            markets=scanner_stats.get("markets", 0),
+            price_updates=scanner_stats.get("price_updates", 0),
+            opportunities=self.stats.opportunities_found,
+            trades=self.stats.trades_executed,
+            successful=self.stats.trades_successful,
+            profit=f"${float(self.stats.total_profit):.2f}",
+        )
+
+    async def __aenter__(self) -> "RealtimeArbitrageBot":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.shutdown()
+
+
+async def run_realtime_bot() -> None:
+    """Entry point for running the real-time bot."""
+    settings = get_settings()
+    setup_logging(settings.log_level)
+
+    async with RealtimeArbitrageBot() as bot:
         await bot.run()

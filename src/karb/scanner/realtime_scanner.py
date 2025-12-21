@@ -1,0 +1,313 @@
+"""Real-time market scanner using WebSocket streaming."""
+
+import asyncio
+from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import Callable, Optional
+
+from karb.api.gamma import GammaClient
+from karb.api.models import Market
+from karb.api.websocket import (
+    OrderBookUpdate,
+    PriceChange,
+    WebSocketClient,
+)
+from karb.config import get_settings
+from karb.utils.logging import get_logger
+
+log = get_logger(__name__)
+
+# Maximum assets per WebSocket connection
+MAX_ASSETS_PER_WS = 500
+
+
+@dataclass
+class MarketPrices:
+    """Tracks current prices for a market's YES and NO tokens."""
+    market: Market
+    yes_best_bid: Optional[Decimal] = None
+    yes_best_ask: Optional[Decimal] = None
+    no_best_bid: Optional[Decimal] = None
+    no_best_ask: Optional[Decimal] = None
+
+    @property
+    def combined_ask(self) -> Optional[Decimal]:
+        """Cost to buy both YES and NO at best ask."""
+        if self.yes_best_ask is None or self.no_best_ask is None:
+            return None
+        return self.yes_best_ask + self.no_best_ask
+
+    @property
+    def arbitrage_profit(self) -> Optional[Decimal]:
+        """Potential profit from arbitrage (1 - combined_ask)."""
+        combined = self.combined_ask
+        if combined is None:
+            return None
+        return Decimal("1") - combined
+
+    @property
+    def has_arbitrage(self) -> bool:
+        """Check if arbitrage opportunity exists."""
+        profit = self.arbitrage_profit
+        if profit is None:
+            return False
+        settings = get_settings()
+        return profit > Decimal(str(settings.min_profit_threshold))
+
+
+@dataclass
+class ArbitrageAlert:
+    """Alert for detected arbitrage opportunity."""
+    market: Market
+    yes_ask: Decimal
+    no_ask: Decimal
+    combined_cost: Decimal
+    profit_pct: Decimal
+    timestamp: float
+
+
+# Callback type for arbitrage alerts
+ArbitrageCallback = Callable[[ArbitrageAlert], None]
+
+
+class RealtimeScanner:
+    """
+    Real-time market scanner using WebSocket streaming.
+
+    Instead of polling, this scanner:
+    1. Loads markets from Gamma API
+    2. Subscribes to WebSocket for real-time price updates
+    3. Triggers callbacks instantly when arbitrage is detected
+    """
+
+    def __init__(
+        self,
+        on_arbitrage: Optional[ArbitrageCallback] = None,
+        min_liquidity: float = 1000.0,
+        max_markets: int = 400,  # Leave room under 500 limit (2 tokens per market)
+    ) -> None:
+        settings = get_settings()
+
+        self.gamma = GammaClient()
+        self.ws_client = WebSocketClient(
+            on_book=self._on_book_update,
+            on_price_change=self._on_price_change,
+        )
+
+        self._on_arbitrage = on_arbitrage
+        self.min_liquidity = min_liquidity or settings.min_liquidity_usd
+        self.max_markets = max_markets
+
+        # State
+        self._markets: dict[str, Market] = {}  # market_id -> Market
+        self._token_to_market: dict[str, str] = {}  # token_id -> market_id
+        self._market_prices: dict[str, MarketPrices] = {}  # market_id -> MarketPrices
+        self._running = False
+
+        # Stats
+        self._price_updates = 0
+        self._arbitrage_alerts = 0
+
+    async def load_markets(self) -> list[Market]:
+        """Load active markets from Gamma API."""
+        log.info("Loading markets from Gamma API...")
+
+        markets = await self.gamma.fetch_all_active_markets(
+            min_liquidity=self.min_liquidity,
+        )
+
+        # Sort by liquidity and take top N
+        markets.sort(key=lambda m: m.liquidity, reverse=True)
+        markets = markets[:self.max_markets]
+
+        # Build lookup tables
+        self._markets = {}
+        self._token_to_market = {}
+        self._market_prices = {}
+
+        for market in markets:
+            self._markets[market.id] = market
+            self._token_to_market[market.yes_token.token_id] = market.id
+            self._token_to_market[market.no_token.token_id] = market.id
+            self._market_prices[market.id] = MarketPrices(market=market)
+
+        log.info(
+            "Markets loaded",
+            count=len(markets),
+            min_liquidity=self.min_liquidity,
+        )
+
+        return markets
+
+    async def subscribe_to_markets(self) -> None:
+        """Subscribe to WebSocket updates for all loaded markets."""
+        # Collect all token IDs (YES and NO for each market)
+        token_ids = []
+        for market in self._markets.values():
+            token_ids.append(market.yes_token.token_id)
+            token_ids.append(market.no_token.token_id)
+
+        log.info("Subscribing to tokens", count=len(token_ids))
+        await self.ws_client.subscribe(token_ids)
+
+    def _on_book_update(self, update: OrderBookUpdate) -> None:
+        """Handle orderbook snapshot update."""
+        self._update_prices(
+            update.asset_id,
+            update.best_bid,
+            update.best_ask,
+        )
+
+    def _on_price_change(self, change: PriceChange) -> None:
+        """Handle real-time price change."""
+        self._price_updates += 1
+        self._update_prices(
+            change.asset_id,
+            change.best_bid,
+            change.best_ask,
+        )
+
+    def _update_prices(
+        self,
+        token_id: str,
+        best_bid: Optional[Decimal],
+        best_ask: Optional[Decimal],
+    ) -> None:
+        """Update prices for a token and check for arbitrage."""
+        market_id = self._token_to_market.get(token_id)
+        if not market_id:
+            return
+
+        market = self._markets.get(market_id)
+        if not market:
+            return
+
+        prices = self._market_prices.get(market_id)
+        if not prices:
+            return
+
+        # Update the appropriate side
+        if token_id == market.yes_token.token_id:
+            prices.yes_best_bid = best_bid
+            prices.yes_best_ask = best_ask
+        elif token_id == market.no_token.token_id:
+            prices.no_best_bid = best_bid
+            prices.no_best_ask = best_ask
+
+        # Check for arbitrage
+        self._check_arbitrage(prices)
+
+    def _check_arbitrage(self, prices: MarketPrices) -> None:
+        """Check if market has arbitrage opportunity and trigger alert."""
+        if not prices.has_arbitrage:
+            return
+
+        # We have an opportunity!
+        combined = prices.combined_ask
+        profit = prices.arbitrage_profit
+
+        if combined is None or profit is None:
+            return
+
+        self._arbitrage_alerts += 1
+
+        alert = ArbitrageAlert(
+            market=prices.market,
+            yes_ask=prices.yes_best_ask or Decimal("0"),
+            no_ask=prices.no_best_ask or Decimal("0"),
+            combined_cost=combined,
+            profit_pct=profit,
+            timestamp=asyncio.get_event_loop().time(),
+        )
+
+        log.info(
+            "ARBITRAGE DETECTED",
+            market=prices.market.question[:50],
+            yes_ask=f"${float(alert.yes_ask):.4f}",
+            no_ask=f"${float(alert.no_ask):.4f}",
+            combined=f"${float(alert.combined_cost):.4f}",
+            profit=f"{float(alert.profit_pct) * 100:.2f}%",
+        )
+
+        # Trigger callback
+        if self._on_arbitrage:
+            try:
+                result = self._on_arbitrage(alert)
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
+            except Exception as e:
+                log.error("Arbitrage callback error", error=str(e))
+
+    async def run(self) -> None:
+        """Run the real-time scanner."""
+        self._running = True
+
+        log.info("Starting real-time scanner")
+
+        # Load markets
+        await self.load_markets()
+
+        # Connect to WebSocket
+        await self.ws_client.connect()
+
+        # Subscribe to all markets
+        await self.subscribe_to_markets()
+
+        # Run WebSocket listener with periodic market refresh
+        await asyncio.gather(
+            self.ws_client.listen(),
+            self._periodic_market_refresh(),
+            self._periodic_stats(),
+        )
+
+    async def _periodic_market_refresh(self, interval: float = 300) -> None:
+        """Periodically refresh market list."""
+        while self._running:
+            await asyncio.sleep(interval)
+
+            try:
+                log.info("Refreshing market list...")
+                await self.load_markets()
+                await self.subscribe_to_markets()
+            except Exception as e:
+                log.error("Market refresh error", error=str(e))
+
+    async def _periodic_stats(self, interval: float = 60) -> None:
+        """Log periodic statistics."""
+        while self._running:
+            await asyncio.sleep(interval)
+
+            log.info(
+                "Scanner stats",
+                markets=len(self._markets),
+                price_updates=self._price_updates,
+                arbitrage_alerts=self._arbitrage_alerts,
+                ws_connected=self.ws_client.is_connected,
+            )
+
+    def stop(self) -> None:
+        """Stop the scanner."""
+        log.info("Stopping real-time scanner")
+        self._running = False
+
+    async def close(self) -> None:
+        """Close all connections."""
+        self.stop()
+        await self.ws_client.close()
+        await self.gamma.close()
+
+    def get_stats(self) -> dict:
+        """Get scanner statistics."""
+        return {
+            "markets": len(self._markets),
+            "price_updates": self._price_updates,
+            "arbitrage_alerts": self._arbitrage_alerts,
+            "ws_connected": self.ws_client.is_connected,
+            "subscribed_tokens": self.ws_client.subscribed_count,
+        }
+
+    async def __aenter__(self) -> "RealtimeScanner":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.close()
