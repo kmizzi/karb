@@ -211,13 +211,24 @@ def create_app() -> FastAPI:
 
         # Fetch fresh data
         try:
+            import os
             from karb.api.gamma import GammaClient
             from karb.api.kalshi import KalshiClient
-            from karb.matcher.event_matcher import EventMatcher
+
+            # Use LLM matcher if API key is available, otherwise fall back to fuzzy
+            use_llm = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
+            if use_llm:
+                from karb.matcher.llm_matcher import LLMMatcher
+                provider = os.environ.get("LLM_PROVIDER", "anthropic")
+                matcher = LLMMatcher(provider=provider)
+                log.info("Using LLM matcher", provider=provider)
+            else:
+                from karb.matcher.event_matcher import EventMatcher
+                matcher = EventMatcher(min_confidence=0.5)
+                log.info("Using fuzzy matcher (no LLM API key configured)")
 
             gamma = GammaClient()
             kalshi = KalshiClient()
-            matcher = EventMatcher(min_confidence=0.5)
 
             # Load markets from both platforms
             poly_markets, kalshi_markets = await asyncio.gather(
@@ -265,6 +276,7 @@ def create_app() -> FastAPI:
                         "confidence": round(m.confidence, 2),
                         "match_type": m.match_type,
                         "spread_pct": spread,
+                        "reasoning": getattr(m, 'reasoning', ''),
                     })
 
             # Sort by confidence
