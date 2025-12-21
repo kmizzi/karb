@@ -188,7 +188,16 @@ class WebSocketClient:
 
     async def _handle_message(self, raw_message: str) -> None:
         """Handle incoming WebSocket message."""
-        data = json.loads(raw_message)
+        # Ignore empty messages (heartbeats, etc.)
+        if not raw_message or not raw_message.strip():
+            return
+
+        try:
+            data = json.loads(raw_message)
+        except json.JSONDecodeError:
+            # Log but don't crash on malformed messages
+            log.debug("Received non-JSON message", length=len(raw_message))
+            return
 
         # Messages can come as arrays (batch) or single objects
         if isinstance(data, list):
