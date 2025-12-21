@@ -1,0 +1,619 @@
+# Polymarket Arbitrage Bot - Product Requirements Document
+
+## Executive Summary
+
+This document outlines the requirements for building an automated arbitrage trading bot for Polymarket, a decentralized prediction market platform. The MVP focuses on **pure arbitrage** - buying YES + NO tokens when their combined price is less than $1, guaranteeing risk-free profit regardless of outcome.
+
+---
+
+## Table of Contents
+
+1. [Market Context](#market-context)
+2. [Strategy Deep Dive](#strategy-deep-dive)
+3. [Technical Architecture](#technical-architecture)
+4. [MVP Scope](#mvp-scope)
+5. [API Integration](#api-integration)
+6. [Implementation Phases](#implementation-phases)
+7. [Risk Analysis](#risk-analysis)
+8. [Success Metrics](#success-metrics)
+
+---
+
+## Market Context
+
+### How Polymarket Works
+
+Polymarket is a prediction market where users trade on outcomes of real-world events. Each market has binary outcomes (YES/NO), and each outcome is represented by an ERC-1155 token on Polygon.
+
+**Key Mechanics:**
+- YES token + NO token always resolve to $1.00 total (one wins, one loses)
+- Tokens trade between $0.00 and $1.00
+- When market resolves, winning tokens pay $1.00, losing tokens pay $0.00
+- Trading uses USDC on Polygon blockchain
+
+### The Arbitrage Opportunity
+
+In efficient markets, YES + NO prices should equal ~$1.00 (minus fees). However, due to:
+- Market volatility (especially crypto markets with 15-min resolution)
+- Latency between traders
+- Liquidity imbalances
+- Information asymmetry
+
+...prices temporarily diverge, creating arbitrage windows.
+
+**Example:**
+```
+YES price: $0.48
+NO price:  $0.49
+Total:     $0.97
+
+Action: Buy $100 YES + $100 NO = $97 spent
+Outcome: One token pays $100, other pays $0
+Profit: $100 - $97 = $3 (3.09% return)
+```
+
+---
+
+## Strategy Deep Dive
+
+### Strategy 1: Pure Arbitrage (MVP)
+
+**Concept:** Simultaneously buy YES and NO tokens when combined price < $1.00
+
+**Profit Formula:**
+```
+Profit = (1 - YES_price - NO_price) × trade_size - fees
+```
+
+**Requirements:**
+- Combined price < $0.99 (accounting for ~1% fees)
+- Sufficient liquidity on both sides
+- Fast execution before prices correct
+
+**Target Markets:**
+- High-volume markets (>$100k daily volume)
+- Fast-resolving markets (crypto prices, sports)
+- Markets with active trading creating price movement
+
+**Expected Returns:**
+- Per-trade profit: 0.5-3%
+- Trade frequency: 10-100 per day (depends on market conditions)
+- Monthly return potential: 5-30% on capital
+
+### Strategy 2: Statistical Arbitrage (Future)
+
+**Concept:** Find correlated markets that should move together
+
+**Example:**
+- "Trump wins presidency" at 55%
+- "GOP wins Senate" at 45%
+
+These are correlated - if Trump wins, GOP Senate is more likely. When correlation breaks:
+- Short the relatively expensive market
+- Long the relatively cheap market
+- Close when they converge
+
+### Strategy 3: Cross-Platform Arbitrage (Future)
+
+**Concept:** Price differences between Polymarket and other platforms (Binance predictions, Kalshi, etc.)
+
+---
+
+## Technical Architecture
+
+### System Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        ARBITRAGE BOT                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
+│  │   Scanner    │───▶│   Analyzer   │───▶│   Executor   │      │
+│  │              │    │              │    │              │      │
+│  │ • Poll APIs  │    │ • Calc arb   │    │ • Place orders│     │
+│  │ • Track bids │    │ • Check liq  │    │ • Monitor fill│     │
+│  │ • Watch asks │    │ • Risk check │    │ • Log trades  │     │
+│  └──────────────┘    └──────────────┘    └──────────────┘      │
+│         │                   │                   │               │
+│         ▼                   ▼                   ▼               │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                     Data Layer                              ││
+│  │  • Market cache  • Position tracking  • Trade history       ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                              │                                  │
+└──────────────────────────────│──────────────────────────────────┘
+                               │
+        ┌──────────────────────┼──────────────────────┐
+        ▼                      ▼                      ▼
+┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+│  Gamma API   │      │   CLOB API   │      │   Polygon    │
+│              │      │              │      │   Network    │
+│ • Markets    │      │ • Orderbook  │      │              │
+│ • Metadata   │      │ • Orders     │      │ • Settlement │
+│ • Events     │      │ • Trades     │      │ • Wallet     │
+└──────────────┘      └──────────────┘      └──────────────┘
+```
+
+### Component Details
+
+#### 1. Scanner Module
+- Polls Polymarket APIs every 1-3 seconds
+- Maintains real-time orderbook snapshots
+- Tracks bid/ask for all active markets
+- Filters markets by volume, liquidity thresholds
+
+#### 2. Analyzer Module
+- Calculates arbitrage opportunities in real-time
+- Checks: `best_ask_yes + best_ask_no < threshold`
+- Validates sufficient liquidity at target prices
+- Applies risk filters (max position, market health)
+
+#### 3. Executor Module
+- Places orders via CLOB API
+- Handles order signing (EIP-712)
+- Monitors fill status
+- Implements retry logic for partial fills
+
+#### 4. Data Layer
+- SQLite/PostgreSQL for trade history
+- In-memory cache for real-time data
+- Position tracking per market
+- P&L calculations
+
+---
+
+## MVP Scope
+
+### MVP Features (Phase 1)
+
+| Feature | Priority | Description |
+|---------|----------|-------------|
+| Market Scanner | P0 | Poll all active markets for prices |
+| Arbitrage Detection | P0 | Identify YES+NO < threshold opportunities |
+| Order Execution | P0 | Place and monitor orders |
+| Position Tracking | P0 | Track open positions per market |
+| Basic Logging | P0 | Console + file logging |
+| Configuration | P1 | Adjustable thresholds, polling rate |
+| Dry Run Mode | P1 | Simulate trades without execution |
+| Trade History | P1 | SQLite storage of all trades |
+| Telegram Alerts | P2 | Notifications for trades/errors |
+| Web Dashboard | P2 | Real-time monitoring UI |
+
+### MVP Non-Goals
+
+- Multi-platform arbitrage
+- Statistical arbitrage
+- Machine learning models
+- Copy trading
+- High-frequency market making
+
+---
+
+## API Integration
+
+### Polymarket API Ecosystem
+
+#### 1. Gamma Markets API
+**Base URL:** `https://gamma-api.polymarket.com`
+
+**Key Endpoints:**
+```
+GET /markets                    # List all markets
+GET /markets/{id}               # Single market details
+GET /markets?active=true        # Active markets only
+GET /events                     # Event groupings
+```
+
+**Response Structure:**
+```json
+{
+  "id": "0x...",
+  "question": "Will BTC exceed $100k by Dec 31?",
+  "outcomes": ["Yes", "No"],
+  "outcomePrices": ["0.65", "0.35"],
+  "volume": "1500000",
+  "liquidity": "250000",
+  "endDate": "2024-12-31T00:00:00Z",
+  "active": true,
+  "closed": false,
+  "tokens": [
+    {"outcome": "Yes", "token_id": "12345..."},
+    {"outcome": "No", "token_id": "67890..."}
+  ]
+}
+```
+
+#### 2. CLOB (Central Limit Order Book) API
+**Base URL:** `https://clob.polymarket.com`
+
+**Key Endpoints:**
+```
+GET /book                       # Orderbook for a token
+GET /markets                    # Market info with token IDs
+GET /price                      # Current prices
+POST /order                     # Place order (signed)
+DELETE /order/{id}              # Cancel order
+GET /orders                     # User's open orders
+GET /trades                     # User's trade history
+```
+
+**Orderbook Response:**
+```json
+{
+  "market": "0x...",
+  "asset_id": "12345...",
+  "bids": [
+    {"price": "0.48", "size": "1000"},
+    {"price": "0.47", "size": "2500"}
+  ],
+  "asks": [
+    {"price": "0.49", "size": "800"},
+    {"price": "0.50", "size": "1500"}
+  ]
+}
+```
+
+**Order Placement:**
+```json
+POST /order
+{
+  "order": {
+    "salt": "random_nonce",
+    "maker": "0xYourAddress",
+    "signer": "0xYourAddress",
+    "taker": "0x0000...",
+    "tokenId": "12345...",
+    "makerAmount": "100000000",  // USDC (6 decimals)
+    "takerAmount": "200000000",  // Outcome tokens
+    "side": "BUY",
+    "expiration": "0",
+    "nonce": "0",
+    "feeRateBps": "0",
+    "signatureType": 2
+  },
+  "signature": "0x...",
+  "owner": "0xYourAddress"
+}
+```
+
+#### 3. Data API
+**Base URL:** `https://data-api.polymarket.com`
+
+```
+GET /markets/{id}/history       # Price history
+GET /markets/{id}/trades        # Recent trades
+GET /activity                   # Platform activity
+```
+
+### Authentication
+
+CLOB API uses EIP-712 signatures for order authentication:
+
+1. Create order object
+2. Hash using EIP-712 typed data
+3. Sign with private key
+4. Include signature in API request
+
+**No API keys required** - authentication is wallet-based.
+
+---
+
+## Implementation Phases
+
+### Phase 1: Foundation (MVP)
+
+#### 1.1 Project Setup
+- [ ] Initialize Python project with Poetry/pip
+- [ ] Set up configuration management (env vars, config files)
+- [ ] Implement logging infrastructure
+- [ ] Create basic project structure
+
+#### 1.2 API Client
+- [ ] Gamma API client (market discovery)
+- [ ] CLOB API client (orderbook, orders)
+- [ ] Rate limiting and error handling
+- [ ] Response parsing and validation
+
+#### 1.3 Wallet Integration
+- [ ] Web3.py integration for Polygon
+- [ ] EIP-712 signing for orders
+- [ ] USDC balance checking
+- [ ] Transaction monitoring
+
+#### 1.4 Scanner
+- [ ] Market polling loop
+- [ ] Orderbook caching
+- [ ] Configurable polling interval
+- [ ] Market filtering (volume, liquidity)
+
+#### 1.5 Arbitrage Detection
+- [ ] Calculate YES + NO spreads
+- [ ] Check liquidity depth at target prices
+- [ ] Apply minimum profit threshold
+- [ ] Generate trade signals
+
+#### 1.6 Order Execution
+- [ ] Order construction
+- [ ] Order signing
+- [ ] Simultaneous YES + NO placement
+- [ ] Fill monitoring and confirmation
+
+#### 1.7 Position Management
+- [ ] Track open positions
+- [ ] Calculate unrealized P&L
+- [ ] Handle market resolution
+- [ ] Position limits
+
+### Phase 2: Robustness
+
+- [ ] Retry logic for failed orders
+- [ ] Partial fill handling
+- [ ] Network error recovery
+- [ ] Database persistence
+- [ ] Graceful shutdown
+
+### Phase 3: Monitoring
+
+- [ ] Telegram bot integration
+- [ ] Performance metrics
+- [ ] Error alerting
+- [ ] Daily summary reports
+
+### Phase 4: Optimization
+
+- [ ] Reduce latency (async, connection pooling)
+- [ ] Smart order sizing based on liquidity
+- [ ] Market prioritization scoring
+- [ ] Backtesting framework
+
+---
+
+## Risk Analysis
+
+### Technical Risks
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| API rate limiting | Medium | Implement backoff, cache aggressively |
+| Order execution latency | High | Use fastest endpoints, minimize processing |
+| Partial fills | Medium | Handle gracefully, track exposure |
+| Network congestion | Medium | Monitor gas prices, use priority fees |
+| API changes | Low | Version API clients, monitor changelogs |
+
+### Financial Risks
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Slippage | High | Check orderbook depth, use limit orders |
+| One-sided execution | High | Atomic execution or immediate hedge |
+| Capital lockup | Medium | Set position limits per market |
+| Smart contract risk | Low | Use official Polymarket contracts only |
+
+### Operational Risks
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Bot downtime | Medium | VPS with monitoring, auto-restart |
+| Wallet compromise | Critical | Use dedicated wallet, limit funds |
+| Market manipulation | Low | Avoid thin markets, set min liquidity |
+
+### Edge Cases to Handle
+
+1. **Market resolution during trade:** Check market status before execution
+2. **Price moves between detection and execution:** Re-validate before placing
+3. **Insufficient balance:** Pre-check USDC and token balances
+4. **Duplicate orders:** Track pending orders, implement idempotency
+5. **Gas price spikes:** Set max gas limits, pause during spikes
+
+---
+
+## Success Metrics
+
+### MVP Success Criteria
+
+| Metric | Target |
+|--------|--------|
+| Successful arbitrage trades | >10 per day |
+| Trade success rate | >90% |
+| Average profit per trade | >0.5% |
+| System uptime | >99% |
+| Max drawdown | <5% of capital |
+
+### KPIs to Track
+
+**Trading Metrics:**
+- Total trades executed
+- Win rate (profitable vs unprofitable)
+- Average profit per trade
+- Total volume traded
+- Fees paid
+
+**Operational Metrics:**
+- API response times
+- Order fill rates
+- System uptime
+- Error frequency
+
+**Financial Metrics:**
+- Total P&L (realized + unrealized)
+- ROI on capital deployed
+- Sharpe ratio
+- Max drawdown
+
+---
+
+## Tech Stack
+
+### Core
+- **Language:** Python 3.11+
+- **Async:** asyncio + aiohttp
+- **Blockchain:** web3.py
+- **Database:** SQLite (MVP) → PostgreSQL (scale)
+
+### Dependencies
+```
+aiohttp          # Async HTTP client
+web3             # Ethereum/Polygon interaction
+eth-account      # Wallet and signing
+python-dotenv    # Configuration
+structlog        # Structured logging
+sqlite3          # Trade storage (built-in)
+```
+
+### Infrastructure
+- **Runtime:** VPS (DigitalOcean, AWS, etc.)
+- **Monitoring:** Custom + Telegram alerts
+- **Deployment:** Docker container
+
+---
+
+## Configuration
+
+### Environment Variables
+```bash
+# Wallet
+PRIVATE_KEY=0x...
+WALLET_ADDRESS=0x...
+
+# Network
+POLYGON_RPC_URL=https://polygon-rpc.com
+CHAIN_ID=137
+
+# Trading
+MIN_PROFIT_THRESHOLD=0.005      # 0.5% minimum profit
+MAX_POSITION_SIZE=1000          # Max $1000 per market
+POLL_INTERVAL_SECONDS=2
+MIN_LIQUIDITY_USD=5000          # Min liquidity to trade
+
+# API
+CLOB_BASE_URL=https://clob.polymarket.com
+GAMMA_BASE_URL=https://gamma-api.polymarket.com
+
+# Alerts
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+```
+
+---
+
+## File Structure
+
+```
+polymarket-arb/
+├── src/
+│   ├── __init__.py
+│   ├── main.py                 # Entry point
+│   ├── config.py               # Configuration loading
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── gamma.py            # Gamma API client
+│   │   ├── clob.py             # CLOB API client
+│   │   └── models.py           # API response models
+│   ├── scanner/
+│   │   ├── __init__.py
+│   │   └── market_scanner.py   # Market polling
+│   ├── analyzer/
+│   │   ├── __init__.py
+│   │   └── arbitrage.py        # Opportunity detection
+│   ├── executor/
+│   │   ├── __init__.py
+│   │   ├── order_builder.py    # Order construction
+│   │   ├── signer.py           # EIP-712 signing
+│   │   └── executor.py         # Order execution
+│   ├── data/
+│   │   ├── __init__.py
+│   │   ├── database.py         # SQLite operations
+│   │   └── models.py           # Data models
+│   └── utils/
+│       ├── __init__.py
+│       └── logging.py          # Logging setup
+├── tests/
+│   └── ...
+├── .env.example
+├── pyproject.toml
+├── README.md
+└── PRD.md
+```
+
+---
+
+## Appendix
+
+### A. Polymarket Fee Structure
+
+- **Trading fee:** ~1% (varies by market)
+- **Gas fees:** Polygon gas (typically <$0.01)
+- **No deposit/withdrawal fees**
+
+### B. Useful Resources
+
+- Polymarket Docs: https://docs.polymarket.com
+- CLOB API Reference: https://docs.polymarket.com/#clob-api
+- Polygon RPC: https://polygon-rpc.com
+
+### C. Example Arbitrage Calculation
+
+```python
+# Market: "Will ETH > $4000 by Friday?"
+yes_ask = 0.52  # Best ask for YES
+no_ask = 0.46   # Best ask for NO
+total = yes_ask + no_ask  # 0.98
+
+# Opportunity exists: total < 1.00
+spread = 1.00 - total  # 0.02 (2%)
+
+# With $1000 capital
+yes_cost = 1000 * yes_ask  # $520
+no_cost = 1000 * no_ask    # $460
+total_cost = 980           # $980
+
+# Outcome (either wins)
+payout = 1000              # $1000
+gross_profit = 20          # $20
+fees = 980 * 0.01          # ~$9.80
+net_profit = 10.20         # $10.20 (1.04% net return)
+```
+
+### D. Order Signing (EIP-712)
+
+```python
+from eth_account import Account
+from eth_account.messages import encode_typed_data
+
+order_types = {
+    "Order": [
+        {"name": "salt", "type": "uint256"},
+        {"name": "maker", "type": "address"},
+        {"name": "signer", "type": "address"},
+        {"name": "taker", "type": "address"},
+        {"name": "tokenId", "type": "uint256"},
+        {"name": "makerAmount", "type": "uint256"},
+        {"name": "takerAmount", "type": "uint256"},
+        {"name": "expiration", "type": "uint256"},
+        {"name": "nonce", "type": "uint256"},
+        {"name": "feeRateBps", "type": "uint256"},
+        {"name": "side", "type": "uint8"},
+        {"name": "signatureType", "type": "uint8"},
+    ]
+}
+
+domain = {
+    "name": "Polymarket CTF Exchange",
+    "version": "1",
+    "chainId": 137,
+    "verifyingContract": "0x..."
+}
+
+# Sign order
+signable = encode_typed_data(domain, order_types, order_data)
+signature = Account.sign_message(signable, private_key)
+```
+
+---
+
+## Changelog
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 0.1 | 2024-XX-XX | Initial PRD |
