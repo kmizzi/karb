@@ -12,6 +12,7 @@ import aiohttp
 from karb.api.models import ArbitrageOpportunity
 from karb.config import get_settings
 from karb.executor.signer import OrderSide, OrderSigner, SignedOrder
+from karb.tracking.trades import Trade, TradeLog
 from karb.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -102,6 +103,7 @@ class OrderExecutor:
         self.stats = ExecutorStats()
         self._session: Optional[aiohttp.ClientSession] = None
         self._execution_history: list[ExecutionResult] = []
+        self._trade_log = TradeLog()
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -210,7 +212,50 @@ class OrderExecutor:
         self.stats.total_profit += opportunity.expected_profit_usd
 
         self._execution_history.append(result)
+
+        # Log trades
+        self._log_trades(result)
+
         return result
+
+    def _log_trades(self, result: ExecutionResult) -> None:
+        """Log trades to persistent storage."""
+        opp = result.opportunity
+        timestamp = result.timestamp.isoformat()
+
+        # Log YES order if it was submitted
+        if result.yes_order.status in (ExecutionStatus.FILLED, ExecutionStatus.SUBMITTED):
+            self._trade_log.log_trade(Trade(
+                timestamp=timestamp,
+                platform="polymarket",
+                market_id=opp.market.condition_id,
+                market_name=opp.market.question,
+                side="buy",
+                outcome="yes",
+                price=float(result.yes_order.price),
+                size=float(result.yes_order.filled_size or result.yes_order.size),
+                cost=float(result.yes_order.price * (result.yes_order.filled_size or result.yes_order.size)),
+                order_id=result.yes_order.order_id,
+                strategy="single_market",
+                profit_expected=float(opp.expected_profit_usd) / 2,  # Split between both orders
+            ))
+
+        # Log NO order if it was submitted
+        if result.no_order.status in (ExecutionStatus.FILLED, ExecutionStatus.SUBMITTED):
+            self._trade_log.log_trade(Trade(
+                timestamp=timestamp,
+                platform="polymarket",
+                market_id=opp.market.condition_id,
+                market_name=opp.market.question,
+                side="buy",
+                outcome="no",
+                price=float(result.no_order.price),
+                size=float(result.no_order.filled_size or result.no_order.size),
+                cost=float(result.no_order.price * (result.no_order.filled_size or result.no_order.size)),
+                order_id=result.no_order.order_id,
+                strategy="single_market",
+                profit_expected=float(opp.expected_profit_usd) / 2,
+            ))
 
     async def execute(self, opportunity: ArbitrageOpportunity) -> ExecutionResult:
         """
@@ -382,6 +427,9 @@ class OrderExecutor:
         )
 
         self._execution_history.append(result)
+
+        # Log trades
+        self._log_trades(result)
 
         log.info(
             "Execution complete",

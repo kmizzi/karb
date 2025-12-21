@@ -410,6 +410,208 @@ def crossplatform_scan() -> None:
     asyncio.run(_scan())
 
 
+@cli.command()
+def status() -> None:
+    """Show bot status, balances, and recent activity."""
+    setup_logging("WARNING")
+
+    async def _status() -> None:
+        from karb.tracking.portfolio import PortfolioTracker
+        from karb.tracking.trades import TradeLog
+
+        settings = get_settings()
+        tracker = PortfolioTracker()
+        trade_log = TradeLog()
+
+        console.print("\n[bold]Karb Bot Status[/bold]\n")
+
+        # Current balances
+        console.print("[bold cyan]Balances[/bold cyan]")
+        balances = await tracker.get_current_balances()
+
+        balance_table = Table(show_header=False, box=None)
+        balance_table.add_column("Platform", style="dim")
+        balance_table.add_column("Balance", justify="right")
+
+        if balances["polymarket_usdc"] > 0:
+            balance_table.add_row("Polymarket (USDC)", f"${balances['polymarket_usdc']:.2f}")
+        if balances["kalshi_usd"] > 0:
+            balance_table.add_row("Kalshi (USD)", f"${balances['kalshi_usd']:.2f}")
+
+        balance_table.add_row("[bold]Total[/bold]", f"[bold]${balances['total_usd']:.2f}[/bold]")
+        console.print(balance_table)
+
+        # Record snapshot
+        from karb.tracking.portfolio import BalanceSnapshot
+        snapshot = BalanceSnapshot(
+            timestamp=balances["timestamp"],
+            polymarket_usdc=balances["polymarket_usdc"],
+            kalshi_usd=balances["kalshi_usd"],
+            total_usd=balances["total_usd"],
+        )
+        tracker.record_snapshot(snapshot)
+
+        console.print()
+
+        # Recent trades
+        console.print("[bold cyan]Recent Trades[/bold cyan]")
+        trades = trade_log.get_trades(limit=10)
+
+        if not trades:
+            console.print("[dim]No trades recorded yet[/dim]")
+        else:
+            trade_table = Table()
+            trade_table.add_column("Time", style="dim")
+            trade_table.add_column("Platform")
+            trade_table.add_column("Market", max_width=25)
+            trade_table.add_column("Side")
+            trade_table.add_column("Price", justify="right")
+            trade_table.add_column("Size", justify="right")
+
+            for t in trades:
+                time_str = t.timestamp.split("T")[1][:8] if "T" in t.timestamp else t.timestamp
+                side_color = "green" if t.side == "buy" else "red"
+                trade_table.add_row(
+                    time_str,
+                    t.platform,
+                    t.market_name[:25],
+                    f"[{side_color}]{t.side.upper()} {t.outcome.upper()}[/{side_color}]",
+                    f"${t.price:.3f}",
+                    f"${t.size:.2f}",
+                )
+
+            console.print(trade_table)
+
+        console.print()
+
+        # Trading summary
+        console.print("[bold cyan]Summary[/bold cyan]")
+        summary = trade_log.get_all_time_summary()
+
+        if summary["trade_count"] > 0:
+            console.print(f"[dim]Total trades:[/dim] {summary['trade_count']}")
+            console.print(f"[dim]Total cost:[/dim] ${summary['total_cost']:.2f}")
+            console.print(f"[dim]Expected profit:[/dim] ${summary['expected_profit']:.2f}")
+        else:
+            console.print("[dim]No trading activity yet[/dim]")
+
+        console.print()
+
+        # Mode
+        mode = "[yellow]DRY RUN[/yellow]" if settings.dry_run else "[red]LIVE[/red]"
+        console.print(f"[dim]Mode:[/dim] {mode}")
+
+    asyncio.run(_status())
+
+
+@cli.command()
+def balance() -> None:
+    """Show current balances on all platforms."""
+    setup_logging("WARNING")
+
+    async def _balance() -> None:
+        from karb.tracking.portfolio import PortfolioTracker
+
+        tracker = PortfolioTracker()
+        console.print("\n[bold]Fetching balances...[/bold]\n")
+
+        balances = await tracker.get_current_balances()
+
+        table = Table(title="Platform Balances")
+        table.add_column("Platform", style="cyan")
+        table.add_column("Balance", justify="right")
+        table.add_column("Currency")
+
+        if balances["polymarket_usdc"] > 0 or True:  # Always show
+            table.add_row("Polymarket", f"${balances['polymarket_usdc']:.2f}", "USDC")
+
+        if balances["kalshi_usd"] > 0 or True:  # Always show
+            table.add_row("Kalshi", f"${balances['kalshi_usd']:.2f}", "USD")
+
+        console.print(table)
+        console.print(f"\n[bold]Total:[/bold] ${balances['total_usd']:.2f}")
+
+    asyncio.run(_balance())
+
+
+@cli.command()
+@click.option("--limit", default=20, help="Number of trades to show")
+@click.option("--platform", type=click.Choice(["polymarket", "kalshi"]), help="Filter by platform")
+def trades(limit: int, platform: Optional[str]) -> None:
+    """Show trade history."""
+    from karb.tracking.trades import TradeLog
+
+    trade_log = TradeLog()
+    recent = trade_log.get_trades(limit=limit, platform=platform)
+
+    if not recent:
+        console.print("\n[yellow]No trades recorded yet[/yellow]\n")
+        return
+
+    table = Table(title=f"Recent Trades (showing {len(recent)})")
+    table.add_column("Time", style="dim")
+    table.add_column("Platform")
+    table.add_column("Market", max_width=30)
+    table.add_column("Action")
+    table.add_column("Price", justify="right")
+    table.add_column("Size", justify="right")
+    table.add_column("Expected P/L", justify="right")
+
+    for t in recent:
+        time_str = t.timestamp.split("T")[0] + " " + t.timestamp.split("T")[1][:8] if "T" in t.timestamp else t.timestamp
+        side_color = "green" if t.side == "buy" else "red"
+        pl_str = f"${t.profit_expected:.2f}" if t.profit_expected else "-"
+
+        table.add_row(
+            time_str,
+            t.platform,
+            t.market_name[:30],
+            f"[{side_color}]{t.side.upper()} {t.outcome.upper()}[/{side_color}]",
+            f"${t.price:.3f}",
+            f"${t.size:.2f}",
+            pl_str,
+        )
+
+    console.print(table)
+
+    # Summary
+    summary = trade_log.get_all_time_summary()
+    console.print(f"\n[dim]Total trades:[/dim] {summary['trade_count']}")
+    console.print(f"[dim]Total invested:[/dim] ${summary['total_cost']:.2f}")
+    console.print(f"[dim]Expected profit:[/dim] ${summary['expected_profit']:.2f}")
+
+
+@cli.command()
+def pnl() -> None:
+    """Show profit/loss summary."""
+    from datetime import datetime, timedelta
+    from karb.tracking.portfolio import PortfolioTracker
+    from karb.tracking.trades import TradeLog
+
+    tracker = PortfolioTracker()
+    trade_log = TradeLog()
+
+    console.print("\n[bold]Profit & Loss Summary[/bold]\n")
+
+    # Today's trades
+    today_summary = trade_log.get_daily_summary()
+    console.print("[bold cyan]Today[/bold cyan]")
+    console.print(f"  Trades: {today_summary['trade_count']}")
+    console.print(f"  Cost: ${today_summary['total_cost']:.2f}")
+    console.print(f"  Expected profit: ${today_summary['expected_profit']:.2f}")
+    console.print()
+
+    # All-time
+    all_time = trade_log.get_all_time_summary()
+    console.print("[bold cyan]All Time[/bold cyan]")
+    console.print(f"  Total trades: {all_time['trade_count']}")
+    console.print(f"  Total invested: ${all_time['total_cost']:.2f}")
+    console.print(f"  Expected profit: ${all_time['expected_profit']:.2f}")
+
+    if all_time['first_trade']:
+        console.print(f"  First trade: {all_time['first_trade'][:10]}")
+
+
 def main() -> None:
     """Main entry point."""
     cli()
