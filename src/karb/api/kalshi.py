@@ -115,8 +115,15 @@ class KalshiClient:
             if event_ticker:
                 kwargs["event_ticker"] = event_ticker
 
-            response = client.get_markets(**kwargs)
-            return response.markets
+            # Use raw API call to avoid SDK model validation issues
+            import requests
+            from kalshi_python.auth import KalshiAuth
+
+            auth = KalshiAuth(client.configuration)
+            url = f"{client.configuration.host}/markets"
+            resp = requests.get(url, params=kwargs, auth=auth)
+            resp.raise_for_status()
+            return resp.json().get("markets", [])
 
         raw_markets = await asyncio.to_thread(_sync)
 
@@ -124,22 +131,22 @@ class KalshiClient:
         for m in raw_markets:
             try:
                 market = KalshiMarket(
-                    ticker=m.ticker,
-                    event_ticker=m.event_ticker,
-                    title=m.title or "",
-                    subtitle=m.subtitle or "",
-                    yes_bid=Decimal(str(m.yes_bid)) / 100 if m.yes_bid else None,
-                    yes_ask=Decimal(str(m.yes_ask)) / 100 if m.yes_ask else None,
-                    no_bid=Decimal(str(m.no_bid)) / 100 if m.no_bid else None,
-                    no_ask=Decimal(str(m.no_ask)) / 100 if m.no_ask else None,
-                    volume=m.volume or 0,
-                    open_interest=m.open_interest or 0,
-                    status=m.status or "unknown",
-                    close_time=m.close_time,
+                    ticker=m.get("ticker", ""),
+                    event_ticker=m.get("event_ticker", ""),
+                    title=m.get("title") or "",
+                    subtitle=m.get("subtitle") or "",
+                    yes_bid=Decimal(str(m["yes_bid"])) / 100 if m.get("yes_bid") else None,
+                    yes_ask=Decimal(str(m["yes_ask"])) / 100 if m.get("yes_ask") else None,
+                    no_bid=Decimal(str(m["no_bid"])) / 100 if m.get("no_bid") else None,
+                    no_ask=Decimal(str(m["no_ask"])) / 100 if m.get("no_ask") else None,
+                    volume=m.get("volume") or 0,
+                    open_interest=m.get("open_interest") or 0,
+                    status=m.get("status") or "unknown",
+                    close_time=m.get("close_time"),
                 )
                 markets.append(market)
             except Exception as e:
-                log.debug("Failed to parse market", ticker=getattr(m, 'ticker', 'unknown'), error=str(e))
+                log.debug("Failed to parse market", ticker=m.get('ticker', 'unknown'), error=str(e))
 
         return markets
 
