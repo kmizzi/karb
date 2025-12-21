@@ -148,12 +148,12 @@ class WebSocketClient:
 
         self._subscribed_assets.update(new_assets)
 
-        if self._ws and self._ws.open:
+        if self._ws and self.is_connected:
             await self._send_subscription(list(new_assets))
 
     async def _send_subscription(self, asset_ids: list[str]) -> None:
         """Send subscription message to WebSocket."""
-        if not self._ws or not self._ws.open:
+        if not self._ws or not self.is_connected:
             return
 
         message = {
@@ -331,7 +331,15 @@ class WebSocketClient:
     @property
     def is_connected(self) -> bool:
         """Check if WebSocket is connected."""
-        return self._ws is not None and self._ws.open
+        if self._ws is None:
+            return False
+        # websockets v12+ uses .state, older uses .open
+        try:
+            from websockets.protocol import State
+            return self._ws.state == State.OPEN
+        except (ImportError, AttributeError):
+            # Fallback for older versions or different API
+            return getattr(self._ws, 'open', False)
 
     @property
     def subscribed_count(self) -> int:
