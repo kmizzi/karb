@@ -289,6 +289,200 @@
             .two-col { grid-template-columns: 1fr; }
         }
 
+        /* Cross-platform matches modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            overflow-y: auto;
+            padding: 40px 20px;
+        }
+
+        .modal-overlay.active { display: block; }
+
+        .modal {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-tertiary);
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+
+        .modal-close:hover { color: var(--text-primary); }
+
+        .modal-body {
+            padding: 20px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .modal-stats {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .modal-stat {
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .modal-stat-value {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .modal-stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .match-item {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr auto;
+            gap: 16px;
+            align-items: center;
+            padding: 16px;
+            margin-bottom: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .match-platform {
+            min-width: 0;
+        }
+
+        .match-platform-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .match-question {
+            font-size: 13px;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+
+        .match-price {
+            text-align: center;
+            padding: 8px 12px;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            min-width: 80px;
+        }
+
+        .match-price-value {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .match-arrow {
+            font-size: 20px;
+            color: var(--text-secondary);
+        }
+
+        .match-meta {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: flex-end;
+        }
+
+        .match-confidence {
+            font-size: 11px;
+            padding: 4px 8px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+        }
+
+        .match-confidence.high { color: var(--accent-green); }
+        .match-confidence.medium { color: var(--accent-yellow); }
+        .match-confidence.low { color: var(--accent-red); }
+
+        .match-spread {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .match-spread.opportunity { color: var(--accent-green); }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn:hover { background: var(--border); }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+        }
+
+        .btn-primary:hover { background: #4a90d9; }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--text-secondary);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         @media (max-width: 768px) {
             .grid { grid-template-columns: 1fr; }
             .stat-value { font-size: 24px; }
@@ -378,6 +572,29 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Cross-Platform Matches Card -->
+            <div class="card" id="crossplatform-card">
+                <div class="card-header">
+                    <span class="card-title">Cross-Platform</span>
+                    <span class="card-icon">🔗</span>
+                </div>
+                <div id="crossplatform-content">
+                    <div class="stat-row">
+                        <span>Matched Markets</span>
+                        <span id="xp-matches">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Kalshi Status</span>
+                        <span id="xp-kalshi-status">--</span>
+                    </div>
+                    <div class="stat-row" style="border-bottom: none; padding-top: 16px;">
+                        <button class="btn" id="btn-view-matches" onclick="openMatchesModal()">
+                            View Matched Markets
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Live Activity Feed -->
@@ -420,6 +637,40 @@
                 </div>
                 <div class="table-container" id="trades-container">
                     <div class="empty-state">No trades yet</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cross-Platform Matches Modal -->
+    <div class="modal-overlay" id="matches-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">Cross-Platform Market Matches</span>
+                <button class="modal-close" onclick="closeMatchesModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-stats" id="matches-stats">
+                    <div class="modal-stat">
+                        <div class="modal-stat-value" id="modal-poly-count">--</div>
+                        <div class="modal-stat-label">Polymarket</div>
+                    </div>
+                    <div class="modal-stat">
+                        <div class="modal-stat-value" id="modal-kalshi-count">--</div>
+                        <div class="modal-stat-label">Kalshi</div>
+                    </div>
+                    <div class="modal-stat">
+                        <div class="modal-stat-value" id="modal-match-count">--</div>
+                        <div class="modal-stat-label">Matched</div>
+                    </div>
+                    <div style="margin-left: auto;">
+                        <button class="btn btn-primary" id="btn-refresh-matches" onclick="fetchCrossplatformMatches(true)">
+                            Refresh Matches
+                        </button>
+                    </div>
+                </div>
+                <div id="matches-list">
+                    <div class="empty-state">Click "Refresh Matches" to scan both platforms...</div>
                 </div>
             </div>
         </div>
@@ -648,6 +899,116 @@
         setInterval(fetchTrades, 30000);     // Trades every 30s
 
         addLogLine('info', 'Live updates enabled');
+
+        // Cross-platform matches
+        let matchesData = null;
+
+        function openMatchesModal() {
+            document.getElementById('matches-modal').classList.add('active');
+            // Load cached data first
+            if (!matchesData) {
+                fetchCrossplatformMatches(false);
+            }
+        }
+
+        function closeMatchesModal() {
+            document.getElementById('matches-modal').classList.remove('active');
+        }
+
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeMatchesModal();
+        });
+
+        // Close modal on overlay click
+        document.getElementById('matches-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'matches-modal') closeMatchesModal();
+        });
+
+        async function fetchCrossplatformMatches(refresh = false) {
+            const btn = document.getElementById('btn-refresh-matches');
+            const listEl = document.getElementById('matches-list');
+
+            // Show loading state
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-spinner"></span> Loading...';
+
+            if (refresh) {
+                listEl.innerHTML = '<div class="empty-state">Fetching markets from Polymarket and Kalshi...</div>';
+                addLogLine('info', 'Scanning cross-platform markets...');
+            }
+
+            try {
+                const resp = await fetch(`/api/crossplatform/matches?refresh=${refresh}`);
+                const data = await resp.json();
+                matchesData = data;
+
+                // Update stats
+                document.getElementById('modal-poly-count').textContent = data.poly_markets || '--';
+                document.getElementById('modal-kalshi-count').textContent = data.kalshi_markets || '--';
+                document.getElementById('modal-match-count').textContent = data.count || 0;
+
+                // Update card stats
+                document.getElementById('xp-matches').textContent = data.count || 0;
+                document.getElementById('xp-kalshi-status').innerHTML = data.kalshi_markets > 0
+                    ? '<span class="positive">Connected</span>'
+                    : '<span class="negative">Unavailable</span>';
+
+                if (data.error) {
+                    listEl.innerHTML = `<div class="empty-state" style="color: var(--accent-red);">Error: ${data.error}</div>`;
+                    addLogLine('error', `Cross-platform scan failed: ${data.error}`);
+                } else if (!data.matches || data.matches.length === 0) {
+                    listEl.innerHTML = '<div class="empty-state">No matched markets found. Try clicking "Refresh Matches" to scan.</div>';
+                    if (refresh) addLogLine('info', 'No cross-platform matches found');
+                } else {
+                    // Render matches
+                    listEl.innerHTML = data.matches.map(m => {
+                        const confClass = m.confidence >= 0.8 ? 'high' : m.confidence >= 0.6 ? 'medium' : 'low';
+                        const spreadClass = m.spread_pct && m.spread_pct >= 2 ? 'opportunity' : '';
+                        const spreadText = m.spread_pct !== null ? `${m.spread_pct.toFixed(1)}%` : '--';
+
+                        return `
+                            <div class="match-item">
+                                <div class="match-platform">
+                                    <div class="match-platform-label">Polymarket</div>
+                                    <div class="match-question">${m.polymarket.question}</div>
+                                    <div class="match-price">
+                                        <div class="match-price-value">${m.polymarket.yes_price ? '$' + m.polymarket.yes_price.toFixed(2) : '--'}</div>
+                                    </div>
+                                </div>
+                                <div class="match-arrow">↔</div>
+                                <div class="match-platform">
+                                    <div class="match-platform-label">Kalshi</div>
+                                    <div class="match-question">${m.kalshi.title} (${m.kalshi.ticker})</div>
+                                    <div class="match-price">
+                                        <div class="match-price-value">${m.kalshi.yes_price ? '$' + m.kalshi.yes_price.toFixed(2) : '--'}</div>
+                                    </div>
+                                </div>
+                                <div class="match-meta">
+                                    <span class="match-confidence ${confClass}">${(m.confidence * 100).toFixed(0)}% conf</span>
+                                    <span class="match-spread ${spreadClass}">Spread: ${spreadText}</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                    if (refresh) {
+                        addLogLine('info', `Found ${data.count} cross-platform matches (Poly: ${data.poly_markets}, Kalshi: ${data.kalshi_markets})`);
+                    }
+                }
+
+            } catch (e) {
+                console.error('Crossplatform fetch error:', e);
+                listEl.innerHTML = '<div class="empty-state" style="color: var(--accent-red);">Failed to fetch matches</div>';
+                addLogLine('error', 'Failed to fetch cross-platform matches');
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = 'Refresh Matches';
+        }
+
+        // Load cached matches on page load
+        fetchCrossplatformMatches(false);
     </script>
 </body>
 </html>
