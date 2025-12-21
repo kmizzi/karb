@@ -118,10 +118,7 @@ class WebSocketClient:
             self._running = True
             self._reconnect_delay = 1.0  # Reset on successful connect
             log.info("WebSocket connected")
-
-            # Resubscribe to assets if reconnecting
-            if self._subscribed_assets:
-                await self._send_subscription(list(self._subscribed_assets))
+            # Don't auto-resubscribe here - caller will call subscribe()
 
         except Exception as e:
             log.error("WebSocket connection failed", error=str(e))
@@ -152,16 +149,22 @@ class WebSocketClient:
             await self._send_subscription(list(new_assets))
 
     async def _send_subscription(self, asset_ids: list[str]) -> None:
-        """Send subscription message to WebSocket."""
+        """Send subscription message to WebSocket in batches."""
         if not self._ws or not self.is_connected:
             return
 
-        message = {
-            "assets_ids": asset_ids,
-            "type": "market",
-        }
+        # Subscribe in batches to avoid overwhelming the server
+        batch_size = 100
+        for i in range(0, len(asset_ids), batch_size):
+            batch = asset_ids[i:i + batch_size]
+            message = {
+                "assets_ids": batch,
+                "type": "market",
+            }
+            await self._ws.send(json.dumps(message))
+            log.debug("Subscribed batch", batch_num=i // batch_size + 1, count=len(batch))
+            await asyncio.sleep(0.1)  # Small delay between batches
 
-        await self._ws.send(json.dumps(message))
         log.info("Subscribed to assets", count=len(asset_ids))
 
     async def listen(self) -> None:
