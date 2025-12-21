@@ -1,8 +1,10 @@
 """Real-time market scanner using WebSocket streaming."""
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
+from pathlib import Path
 from typing import Callable, Optional
 
 from karb.api.gamma import GammaClient
@@ -16,6 +18,10 @@ from karb.config import get_settings
 from karb.utils.logging import get_logger
 
 log = get_logger(__name__)
+
+# Shared state files for dashboard
+STATS_FILE = Path.home() / ".karb" / "scanner_stats.json"
+ALERTS_FILE = Path.home() / ".karb" / "scanner_alerts.json"
 
 # Maximum assets per WebSocket connection
 MAX_ASSETS_PER_WS = 500
@@ -232,6 +238,9 @@ class RealtimeScanner:
             profit=f"{float(alert.profit_pct) * 100:.2f}%",
         )
 
+        # Save alert to file for dashboard
+        self._save_alert(alert)
+
         # Trigger callback
         if self._on_arbitrage:
             try:
@@ -304,17 +313,61 @@ class RealtimeScanner:
                 log.error("Market refresh error", error=str(e))
 
     async def _periodic_stats(self, interval: float = 60) -> None:
-        """Log periodic statistics."""
+        """Log periodic statistics and write to shared state file."""
         while self._running:
             await asyncio.sleep(interval)
 
+            stats = self.get_stats()
             log.info(
                 "Scanner stats",
-                markets=len(self._markets),
-                price_updates=self._price_updates,
-                arbitrage_alerts=self._arbitrage_alerts,
-                ws_connected=self.ws_client.is_connected,
+                markets=stats["markets"],
+                price_updates=stats["price_updates"],
+                arbitrage_alerts=stats["arbitrage_alerts"],
+                ws_connected=stats["ws_connected"],
             )
+
+            # Write stats to file for dashboard
+            self._write_stats_file(stats)
+
+    def _write_stats_file(self, stats: dict) -> None:
+        """Write stats to shared file for dashboard."""
+        try:
+            STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            stats["last_update"] = asyncio.get_event_loop().time()
+            with open(STATS_FILE, "w") as f:
+                json.dump(stats, f)
+        except Exception as e:
+            log.debug("Failed to write stats file", error=str(e))
+
+    def _save_alert(self, alert: ArbitrageAlert) -> None:
+        """Save arbitrage alert to file for dashboard."""
+        try:
+            ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+            # Load existing alerts
+            alerts = []
+            if ALERTS_FILE.exists():
+                with open(ALERTS_FILE) as f:
+                    alerts = json.load(f)
+
+            # Add new alert
+            from datetime import datetime
+            alerts.append({
+                "market": alert.market.question[:60],
+                "yes_ask": float(alert.yes_ask),
+                "no_ask": float(alert.no_ask),
+                "combined": float(alert.combined_cost),
+                "profit": float(alert.profit_pct),
+                "timestamp": datetime.now().isoformat(),
+            })
+
+            # Keep only last 50 alerts
+            alerts = alerts[-50:]
+
+            with open(ALERTS_FILE, "w") as f:
+                json.dump(alerts, f)
+        except Exception as e:
+            log.debug("Failed to save alert", error=str(e))
 
     def stop(self) -> None:
         """Stop the scanner."""

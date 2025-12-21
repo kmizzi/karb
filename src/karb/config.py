@@ -100,6 +100,20 @@ class Settings(BaseSettings):
         description="If true, simulate trades without executing",
     )
 
+    # Dashboard
+    dashboard_username: str = Field(
+        default="admin",
+        description="Dashboard login username",
+    )
+    dashboard_password: str = Field(
+        default="",
+        description="Dashboard login password",
+    )
+    dashboard_port: int = Field(
+        default=8080,
+        description="Dashboard web server port",
+    )
+
     # Logging
     log_level: str = Field(
         default="INFO",

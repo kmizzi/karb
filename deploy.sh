@@ -32,6 +32,11 @@ if [ ! -f .env ]; then
 PRIVATE_KEY=0x_YOUR_WALLET_PRIVATE_KEY
 WALLET_ADDRESS=0x_YOUR_WALLET_ADDRESS
 
+# Dashboard credentials
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=CHANGE_THIS_PASSWORD
+DASHBOARD_PORT=8080
+
 # Kalshi API (optional - for cross-platform)
 KALSHI_API_KEY=your_kalshi_api_key
 KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
@@ -79,8 +84,27 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
+cat > /etc/systemd/system/karb-dashboard.service << 'EOF'
+[Unit]
+Description=Karb Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/karb
+Environment=PATH=/opt/karb/.venv/bin
+ExecStart=/opt/karb/.venv/bin/karb dashboard
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
 systemctl enable karb
+systemctl enable karb-dashboard
 
 echo ""
 echo "=== Deployment Complete ==="
@@ -88,5 +112,7 @@ echo ""
 echo "Next steps:"
 echo "  1. Edit credentials: nano /opt/karb/.env"
 echo "  2. Start the bot: systemctl start karb"
-echo "  3. Check logs: journalctl -u karb -f"
+echo "  3. Start dashboard: systemctl start karb-dashboard"
+echo "  4. Check bot logs: journalctl -u karb -f"
+echo "  5. Access dashboard: http://YOUR_IP:8080"
 echo ""

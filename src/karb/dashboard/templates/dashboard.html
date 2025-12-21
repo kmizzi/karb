@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Karb Dashboard</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-blue: #58a6ff;
+            --accent-yellow: #d29922;
+            --border: #30363d;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo {
+            font-size: 28px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-badge.live {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+        }
+
+        .status-badge.offline {
+            background: rgba(248, 81, 73, 0.15);
+            color: var(--accent-red);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .card-icon {
+            font-size: 20px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stat-row:last-child {
+            border-bottom: none;
+        }
+
+        .positive { color: var(--accent-green); }
+        .negative { color: var(--accent-red); }
+        .neutral { color: var(--accent-blue); }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+
+        tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .alert-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            border-left: 3px solid var(--accent-green);
+        }
+
+        .alert-market {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .alert-details {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .alert-profit {
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        .refresh-indicator {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .htmx-request .refresh-indicator::after {
+            content: " (updating...)";
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stat-value {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <span class="logo">📊</span>
+                Karb Dashboard
+            </h1>
+            <div id="connection-status" hx-get="/api/status" hx-trigger="load, every 5s" hx-swap="innerHTML">
+                <span class="status-badge offline">
+                    <span class="status-dot"></span>
+                    Loading...
+                </span>
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <div class="grid">
+            <!-- Balance Card -->
+            <div class="card" hx-get="/api/balance" hx-trigger="load, every 30s" hx-swap="innerHTML">
+                <div class="card-header">
+                    <span class="card-title">Balance</span>
+                    <span class="card-icon">💰</span>
+                </div>
+                <div class="stat-value">Loading...</div>
+            </div>
+
+            <!-- Scanner Stats Card -->
+            <div class="card" id="scanner-stats">
+                <div class="card-header">
+                    <span class="card-title">Scanner</span>
+                    <span class="card-icon">📡</span>
+                </div>
+                <div id="scanner-content">
+                    <div class="stat-row">
+                        <span>Markets Monitored</span>
+                        <span id="stat-markets">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Price Updates</span>
+                        <span id="stat-updates">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Arbitrage Alerts</span>
+                        <span id="stat-alerts" class="positive">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- P&L Card -->
+            <div class="card" hx-get="/api/pnl" hx-trigger="load, every 60s" hx-swap="innerHTML">
+                <div class="card-header">
+                    <span class="card-title">Profit & Loss</span>
+                    <span class="card-icon">📈</span>
+                </div>
+                <div class="stat-value">Loading...</div>
+            </div>
+
+            <!-- Config Card -->
+            <div class="card" id="config-card">
+                <div class="card-header">
+                    <span class="card-title">Configuration</span>
+                    <span class="card-icon">⚙️</span>
+                </div>
+                <div id="config-content">
+                    <div class="stat-row">
+                        <span>Mode</span>
+                        <span id="config-mode">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Min Profit</span>
+                        <span id="config-profit">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Max Position</span>
+                        <span id="config-position">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts Section -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title">Recent Arbitrage Alerts</span>
+                <span class="refresh-indicator">Auto-refresh every 5s</span>
+            </div>
+            <div id="alerts-container" hx-get="/api/alerts" hx-trigger="load, every 5s" hx-swap="innerHTML">
+                <div class="empty-state">Loading alerts...</div>
+            </div>
+        </div>
+
+        <!-- Trades Section -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Recent Trades</span>
+                <span class="refresh-indicator">Auto-refresh every 30s</span>
+            </div>
+            <div class="table-container" hx-get="/api/trades" hx-trigger="load, every 30s" hx-swap="innerHTML">
+                <div class="empty-state">Loading trades...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Update scanner stats from status endpoint
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            if (event.detail.target.id === 'connection-status') {
+                fetch('/api/status')
+                    .then(r => r.json())
+                    .then(data => {
+                        // Update connection badge
+                        const isConnected = data.scanner.ws_connected;
+                        event.detail.target.innerHTML = `
+                            <span class="status-badge ${isConnected ? 'live' : 'offline'}">
+                                <span class="status-dot"></span>
+                                ${isConnected ? 'Connected' : 'Disconnected'}
+                            </span>
+                        `;
+
+                        // Update scanner stats
+                        document.getElementById('stat-markets').textContent = data.scanner.markets;
+                        document.getElementById('stat-updates').textContent = data.scanner.price_updates.toLocaleString();
+                        document.getElementById('stat-alerts').textContent = data.scanner.arbitrage_alerts;
+
+                        // Update config
+                        document.getElementById('config-mode').innerHTML = data.bot.dry_run
+                            ? '<span class="neutral">DRY RUN</span>'
+                            : '<span class="positive">LIVE</span>';
+                        document.getElementById('config-profit').textContent = data.bot.min_profit;
+                        document.getElementById('config-position').textContent = data.bot.max_position;
+                    })
+                    .catch(console.error);
+            }
+        });
+
+        // Custom rendering for balance
+        document.body.addEventListener('htmx:beforeSwap', function(event) {
+            const target = event.detail.target;
+
+            if (event.detail.xhr.responseURL.includes('/api/balance')) {
+                const data = JSON.parse(event.detail.xhr.responseText);
+                if (data.error) {
+                    event.detail.serverResponse = `
+                        <div class="card-header">
+                            <span class="card-title">Balance</span>
+                            <span class="card-icon">💰</span>
+                        </div>
+                        <div class="stat-value negative">Error</div>
+                        <div class="stat-label">${data.error}</div>
+                    `;
+                } else {
+                    event.detail.serverResponse = `
+                        <div class="card-header">
+                            <span class="card-title">Balance</span>
+                            <span class="card-icon">💰</span>
+                        </div>
+                        <div class="stat-value">$${data.total_usd.toFixed(2)}</div>
+                        <div class="stat-row">
+                            <span>Polymarket (USDC)</span>
+                            <span>$${data.polymarket_usdc.toFixed(2)}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span>Kalshi (USD)</span>
+                            <span>$${data.kalshi_usd.toFixed(2)}</span>
+                        </div>
+                    `;
+                }
+            }
+
+            if (event.detail.xhr.responseURL.includes('/api/pnl')) {
+                const data = JSON.parse(event.detail.xhr.responseText);
+                const daily = data.daily;
+                const allTime = data.all_time;
+
+                event.detail.serverResponse = `
+                    <div class="card-header">
+                        <span class="card-title">Profit & Loss</span>
+                        <span class="card-icon">📈</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Today's Trades</span>
+                        <span>${daily.trade_count || 0}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Today's Volume</span>
+                        <span>$${(daily.total_cost || 0).toFixed(2)}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>All-Time Trades</span>
+                        <span>${allTime.trade_count || 0}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>All-Time Volume</span>
+                        <span>$${(allTime.total_cost || 0).toFixed(2)}</span>
+                    </div>
+                `;
+            }
+
+            if (event.detail.xhr.responseURL.includes('/api/alerts')) {
+                const data = JSON.parse(event.detail.xhr.responseText);
+                if (data.alerts.length === 0) {
+                    event.detail.serverResponse = `
+                        <div class="empty-state">No arbitrage alerts yet. The bot is monitoring for opportunities...</div>
+                    `;
+                } else {
+                    event.detail.serverResponse = data.alerts.slice().reverse().map(alert => `
+                        <div class="alert-item">
+                            <div class="alert-market">${alert.market || 'Unknown Market'}</div>
+                            <div class="alert-details">
+                                YES: $${(alert.yes_ask || 0).toFixed(4)} +
+                                NO: $${(alert.no_ask || 0).toFixed(4)} =
+                                $${(alert.combined || 0).toFixed(4)}
+                                <span class="alert-profit">+${((alert.profit || 0) * 100).toFixed(2)}%</span>
+                            </div>
+                            <div class="alert-details">${alert.timestamp || ''}</div>
+                        </div>
+                    `).join('');
+                }
+            }
+
+            if (event.detail.xhr.responseURL.includes('/api/trades')) {
+                const data = JSON.parse(event.detail.xhr.responseText);
+                if (data.trades.length === 0) {
+                    event.detail.serverResponse = `
+                        <div class="empty-state">No trades executed yet.</div>
+                    `;
+                } else {
+                    event.detail.serverResponse = `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Platform</th>
+                                    <th>Market</th>
+                                    <th>Side</th>
+                                    <th>Price</th>
+                                    <th>Size</th>
+                                    <th>Cost</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.trades.map(t => `
+                                    <tr>
+                                        <td>${new Date(t.timestamp).toLocaleString()}</td>
+                                        <td>${t.platform}</td>
+                                        <td>${t.market}</td>
+                                        <td>${t.side}</td>
+                                        <td>$${t.price.toFixed(4)}</td>
+                                        <td>${t.size}</td>
+                                        <td>$${t.cost.toFixed(2)}</td>
+                                        <td class="${t.status === 'filled' ? 'positive' : ''}">${t.status}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
