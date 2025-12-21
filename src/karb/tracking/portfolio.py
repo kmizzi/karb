@@ -48,15 +48,22 @@ class PortfolioTracker:
             try:
                 from web3 import Web3
 
-                # USDC on Polygon
-                USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-                USDC_ABI = [{"constant":True,"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":True,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]
+                # Both USDC contracts on Polygon
+                USDC_BRIDGED = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"  # Bridged USDC
+                USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"   # Native USDC
+                USDC_ABI = [{"constant":True,"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"}]
 
                 w3 = Web3(Web3.HTTPProvider(settings.polygon_rpc_url))
-                usdc = w3.eth.contract(address=Web3.to_checksum_address(USDC_ADDRESS), abi=USDC_ABI)
+                wallet = Web3.to_checksum_address(settings.wallet_address)
 
-                raw_balance = usdc.functions.balanceOf(Web3.to_checksum_address(settings.wallet_address)).call()
-                balances["polymarket_usdc"] = raw_balance / 1e6  # USDC has 6 decimals
+                # Check both USDC contracts
+                total_usdc = 0
+                for addr in [USDC_BRIDGED, USDC_NATIVE]:
+                    usdc = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=USDC_ABI)
+                    balance = usdc.functions.balanceOf(wallet).call()
+                    total_usdc += balance / 1e6  # USDC has 6 decimals
+
+                balances["polymarket_usdc"] = total_usdc
             except Exception as e:
                 log.debug("Failed to get Polymarket balance", error=str(e))
 
