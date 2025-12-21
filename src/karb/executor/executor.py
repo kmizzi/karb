@@ -12,6 +12,7 @@ import aiohttp
 from karb.api.models import ArbitrageOpportunity
 from karb.config import get_settings
 from karb.executor.signer import OrderSide, OrderSigner, SignedOrder
+from karb.notifications.slack import get_notifier
 from karb.tracking.trades import Trade, TradeLog
 from karb.utils.logging import get_logger
 
@@ -215,6 +216,21 @@ class OrderExecutor:
 
         # Log trades
         self._log_trades(result)
+
+        # Send Slack notification for dry run
+        try:
+            notifier = get_notifier()
+            asyncio.create_task(notifier.notify_trade(
+                platform="polymarket",
+                market=opportunity.market.question,
+                side="buy",
+                outcome="yes+no",
+                price=opportunity.combined_cost,
+                size=opportunity.max_trade_size,
+                status="simulated",
+            ))
+        except Exception:
+            pass
 
         return result
 
@@ -430,6 +446,22 @@ class OrderExecutor:
 
         # Log trades
         self._log_trades(result)
+
+        # Send Slack notification
+        try:
+            notifier = get_notifier()
+            trade_status = "executed" if status == ExecutionStatus.FILLED else status.value
+            asyncio.create_task(notifier.notify_trade(
+                platform="polymarket",
+                market=opportunity.market.question,
+                side="buy",
+                outcome="yes+no",
+                price=opportunity.combined_cost,
+                size=opportunity.max_trade_size,
+                status=trade_status,
+            ))
+        except Exception:
+            pass
 
         log.info(
             "Execution complete",

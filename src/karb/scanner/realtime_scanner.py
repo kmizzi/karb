@@ -15,6 +15,7 @@ from karb.api.websocket import (
     WebSocketClient,
 )
 from karb.config import get_settings
+from karb.notifications.slack import get_notifier
 from karb.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -240,6 +241,19 @@ class RealtimeScanner:
 
         # Save alert to file for dashboard
         self._save_alert(alert)
+
+        # Send Slack notification
+        try:
+            notifier = get_notifier()
+            asyncio.create_task(notifier.notify_arbitrage(
+                market=prices.market.question,
+                yes_ask=alert.yes_ask,
+                no_ask=alert.no_ask,
+                combined=alert.combined_cost,
+                profit_pct=alert.profit_pct,
+            ))
+        except Exception as e:
+            log.debug("Slack notification failed", error=str(e))
 
         # Trigger callback
         if self._on_arbitrage:

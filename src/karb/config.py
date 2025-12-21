@@ -93,6 +93,10 @@ class Settings(BaseSettings):
         default=None,
         description="Telegram chat ID for alerts",
     )
+    slack_webhook_url: Optional[str] = Field(
+        default=None,
+        description="Slack webhook URL for notifications",
+    )
 
     # Mode
     dry_run: bool = Field(

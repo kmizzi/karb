@@ -10,6 +10,7 @@ from karb.analyzer.arbitrage import ArbitrageAnalyzer
 from karb.api.models import ArbitrageOpportunity
 from karb.config import get_settings
 from karb.executor.executor import ExecutionResult, ExecutionStatus, OrderExecutor
+from karb.notifications.slack import get_notifier
 from karb.scanner.market_scanner import MarketScanner, MarketSnapshot
 from karb.utils.logging import get_logger, setup_logging
 
@@ -307,6 +308,13 @@ class RealtimeArbitrageBot:
                 "Set PRIVATE_KEY and WALLET_ADDRESS in .env for live trading."
             )
 
+        # Send startup notification
+        try:
+            notifier = get_notifier()
+            await notifier.notify_startup(mode=mode)
+        except Exception as e:
+            log.debug("Startup notification failed", error=str(e))
+
         try:
             await self.scanner.run()
         except asyncio.CancelledError:
@@ -324,6 +332,15 @@ class RealtimeArbitrageBot:
         """Clean shutdown."""
         log.info("Shutting down...")
         self.stop()
+
+        # Send shutdown notification
+        try:
+            notifier = get_notifier()
+            await notifier.notify_shutdown(reason="normal")
+            await notifier.close()
+        except Exception:
+            pass
+
         await self.scanner.close()
         await self.executor.close()
         self._log_stats()
