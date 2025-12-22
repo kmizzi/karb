@@ -150,10 +150,12 @@ These are correlated - if Trump wins, GOP Senate is more likely. When correlatio
 - Applies risk filters (max position, market health)
 
 #### 3. Executor Module
-- Places orders via CLOB API
-- Handles order signing (EIP-712)
-- Monitors fill status
-- Implements retry logic for partial fills
+- **Async CLOB client** with native async HTTP (httpx + HTTP/2)
+- Native EIP-712 order signing (~7ms per order)
+- Parallel order submission for YES/NO pairs
+- Connection pooling for reduced latency
+- Monitors fill status with async status checks
+- 10-second timeout with auto-cancellation
 
 #### 4. Data Layer
 - SQLite/PostgreSQL for trade history
@@ -373,7 +375,9 @@ CLOB API uses **L2 Authentication** via the `py-clob-client` library:
 
 ### Phase 4: Optimization
 
-- [ ] Reduce latency (async, connection pooling)
+- [x] Reduce latency (async CLOB client with httpx + HTTP/2)
+- [x] Connection pooling for order submission
+- [x] Parallel order signing (thread pool for CPU-bound EIP-712)
 - [ ] Smart order sizing based on liquidity
 - [ ] Market prioritization scoring
 - [ ] Backtesting framework
@@ -464,10 +468,11 @@ CLOB API uses **L2 Authentication** via the `py-clob-client` library:
 
 ### Dependencies
 ```
-aiohttp          # Async HTTP client
+aiohttp          # Async HTTP client (WebSocket)
+httpx            # Async HTTP client (order execution, HTTP/2)
 web3             # Ethereum/Polygon interaction
-eth-account      # Wallet and signing
-py-clob-client   # Polymarket L2 API client
+eth-account      # Wallet and signing (EIP-712)
+py-clob-client   # Polymarket L2 API client (fallback)
 python-dotenv    # Configuration
 structlog        # Structured logging
 sqlite3          # Trade storage (built-in)
@@ -552,7 +557,8 @@ karb/
 │   ├── analyzer/
 │   │   └── arbitrage.py        # Opportunity detection
 │   ├── executor/
-│   │   └── executor.py         # Order execution + monitoring (with SOCKS5 proxy)
+│   │   ├── executor.py         # Order execution + monitoring (with SOCKS5 proxy)
+│   │   └── async_clob.py       # Async CLOB client (httpx + EIP-712 signing)
 │   ├── dashboard/
 │   │   ├── app.py              # FastAPI dashboard
 │   │   └── templates/
@@ -664,3 +670,4 @@ signature = Account.sign_message(signable, private_key)
 | 0.2 | 2024-12-21 | L2 auth, contract approvals, order monitoring, dashboard order visibility |
 | 0.3 | 2024-12-22 | AWS infra (OpenTofu + Ansible), SOCKS5 proxy support, removed Kalshi |
 | 0.4 | 2025-12-22 | Multi-connection scanner (6 WS, 1500 markets), HTTPS dashboard with Caddy |
+| 0.5 | 2025-12-22 | Async CLOB client (httpx + HTTP/2), native EIP-712 signing, parallel order execution |

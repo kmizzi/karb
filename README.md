@@ -21,6 +21,7 @@ Live trading enabled. Dashboard available at configured domain.
 
 - Real-time WebSocket price monitoring (6 parallel connections, up to 1500 markets)
 - Automatic arbitrage detection and execution
+- **Low-latency async order execution** (native async HTTP with HTTP/2, parallel order signing)
 - Order monitoring with 10-second timeout and auto-cancellation
 - Market filtering by liquidity ($10k+ default) and resolution date (7 days default)
 - Web dashboard with live order visibility (HTTPS with auto SSL)
