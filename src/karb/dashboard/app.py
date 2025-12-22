@@ -29,6 +29,7 @@ TEMPLATE_DIR.mkdir(exist_ok=True)
 STATS_FILE = Path.home() / ".karb" / "scanner_stats.json"
 ALERTS_FILE = Path.home() / ".karb" / "scanner_alerts.json"
 MATCHES_FILE = Path.home() / ".karb" / "crossplatform_matches.json"
+ORDERS_FILE = Path.home() / ".karb" / "orders.json"
 
 security = HTTPBasic()
 
@@ -175,6 +176,31 @@ def create_app() -> FastAPI:
             pass
 
         return {"alerts": alerts[-limit:], "count": len(alerts)}
+
+    @app.get("/api/orders")
+    async def get_orders(username: str = Depends(verify_credentials)):
+        """Get current order status and recent executions."""
+        orders_data = {
+            "active_orders": [],
+            "recent_executions": [],
+            "stats": {
+                "total_attempts": 0,
+                "successful": 0,
+                "partial": 0,
+                "failed": 0,
+                "cancelled": 0,
+            },
+            "updated_at": None,
+        }
+
+        try:
+            if ORDERS_FILE.exists():
+                with open(ORDERS_FILE) as f:
+                    orders_data = json.load(f)
+        except Exception:
+            pass
+
+        return orders_data
 
     @app.get("/api/crossplatform/matches")
     async def get_crossplatform_matches(

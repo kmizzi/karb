@@ -616,6 +616,17 @@
             </div>
         </div>
 
+        <!-- Orders Section -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title">Order Status</span>
+                <span class="refresh-indicator">Live</span>
+            </div>
+            <div id="orders-container">
+                <div class="empty-state">No orders yet</div>
+            </div>
+        </div>
+
         <!-- Alerts and Trades -->
         <div class="two-col">
             <!-- Alerts Section -->
@@ -892,6 +903,132 @@
             }
         }
 
+        async function fetchOrders() {
+            try {
+                const resp = await fetch('/api/orders');
+                const data = await resp.json();
+
+                const container = document.getElementById('orders-container');
+                const activeOrders = data.active_orders || [];
+                const recentExecs = data.recent_executions || [];
+                const stats = data.stats || {};
+
+                let html = '';
+
+                // Stats summary
+                html += `
+                    <div style="display: flex; gap: 20px; margin-bottom: 16px; flex-wrap: wrap;">
+                        <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                            <span style="color: var(--text-secondary);">Total:</span>
+                            <span style="font-weight: 600;">${stats.total_attempts || 0}</span>
+                        </div>
+                        <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                            <span style="color: var(--text-secondary);">Filled:</span>
+                            <span style="font-weight: 600; color: var(--accent-green);">${stats.successful || 0}</span>
+                        </div>
+                        <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                            <span style="color: var(--text-secondary);">Partial:</span>
+                            <span style="font-weight: 600; color: var(--accent-yellow);">${stats.partial || 0}</span>
+                        </div>
+                        <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                            <span style="color: var(--text-secondary);">Cancelled:</span>
+                            <span style="font-weight: 600; color: var(--accent-blue);">${stats.cancelled || 0}</span>
+                        </div>
+                        <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                            <span style="color: var(--text-secondary);">Failed:</span>
+                            <span style="font-weight: 600; color: var(--accent-red);">${stats.failed || 0}</span>
+                        </div>
+                    </div>
+                `;
+
+                // Active orders (in progress)
+                if (activeOrders.length > 0) {
+                    html += `<h4 style="margin: 16px 0 8px; color: var(--accent-yellow);">Active Orders (Pending Fill)</h4>`;
+                    html += `<div class="table-container"><table>
+                        <thead>
+                            <tr>
+                                <th>Market</th>
+                                <th>Outcome</th>
+                                <th>Price</th>
+                                <th>Size</th>
+                                <th>Status</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${activeOrders.map(o => `
+                                <tr>
+                                    <td>${o.market}</td>
+                                    <td><span style="color: ${o.outcome === 'YES' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${o.outcome}</span></td>
+                                    <td>$${o.price.toFixed(3)}</td>
+                                    <td>${o.size}</td>
+                                    <td><span style="color: var(--accent-yellow);">${o.status}</span></td>
+                                    <td>${new Date(o.created_at).toLocaleTimeString()}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table></div>`;
+                }
+
+                // Recent executions
+                if (recentExecs.length > 0) {
+                    html += `<h4 style="margin: 16px 0 8px; color: var(--text-secondary);">Recent Executions</h4>`;
+                    html += `<div class="table-container"><table>
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Market</th>
+                                <th>YES Order</th>
+                                <th>NO Order</th>
+                                <th>Status</th>
+                                <th>Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${recentExecs.slice().reverse().map(e => {
+                                const statusColor = e.status === 'filled' ? 'var(--accent-green)'
+                                    : e.status === 'cancelled' ? 'var(--accent-blue)'
+                                    : e.status === 'partial' ? 'var(--accent-yellow)'
+                                    : 'var(--accent-red)';
+                                return `
+                                <tr>
+                                    <td>${new Date(e.timestamp).toLocaleTimeString()}</td>
+                                    <td>${e.market}</td>
+                                    <td>
+                                        <span style="color: ${e.yes_order.status === 'filled' ? 'var(--accent-green)' : e.yes_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
+                                            ${e.yes_order.status}
+                                        </span>
+                                        <span style="color: var(--text-secondary); font-size: 11px;"> $${e.yes_order.price.toFixed(3)}</span>
+                                    </td>
+                                    <td>
+                                        <span style="color: ${e.no_order.status === 'filled' ? 'var(--accent-green)' : e.no_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
+                                            ${e.no_order.status}
+                                        </span>
+                                        <span style="color: var(--text-secondary); font-size: 11px;"> $${e.no_order.price.toFixed(3)}</span>
+                                    </td>
+                                    <td><span style="color: ${statusColor}; font-weight: 600;">${e.status.toUpperCase()}</span></td>
+                                    <td>$${e.total_cost.toFixed(2)}</td>
+                                </tr>
+                            `}).join('')}
+                        </tbody>
+                    </table></div>`;
+                }
+
+                if (activeOrders.length === 0 && recentExecs.length === 0) {
+                    html = '<div class="empty-state">No orders yet</div>';
+                }
+
+                container.innerHTML = html;
+
+                // Log active orders
+                if (activeOrders.length > 0) {
+                    addLogLine('info', `${activeOrders.length} order(s) pending fill...`);
+                }
+            } catch (e) {
+                console.error('Orders fetch error:', e);
+            }
+        }
+
         // Initial load
         addLogLine('info', 'Dashboard initialized');
         fetchStatus();
@@ -899,6 +1036,7 @@
         fetchPnL();
         fetchAlerts();
         fetchTrades();
+        fetchOrders();
 
         // Refresh intervals
         setInterval(fetchStatus, 5000);      // Status every 5s
@@ -906,6 +1044,7 @@
         setInterval(fetchPnL, 60000);        // PnL every 60s
         setInterval(fetchAlerts, 5000);      // Alerts every 5s
         setInterval(fetchTrades, 30000);     // Trades every 30s
+        setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
 
         addLogLine('info', 'Live updates enabled');
 

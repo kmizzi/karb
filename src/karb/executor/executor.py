@@ -1,11 +1,13 @@
 """Order execution for arbitrage trades."""
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional
 
 from karb.api.models import ArbitrageOpportunity
@@ -14,6 +16,9 @@ from karb.config import get_settings
 # Order monitoring settings
 ORDER_FILL_TIMEOUT_SECONDS = 10  # Max time to wait for order fills
 ORDER_CHECK_INTERVAL_SECONDS = 0.5  # How often to check order status
+
+# Shared state file for dashboard
+ORDERS_FILE = Path.home() / ".karb" / "orders.json"
 from karb.executor.signer import OrderSide, OrderSigner
 from karb.notifications.slack import get_notifier
 from karb.tracking.trades import Trade, TradeLog
@@ -118,6 +123,7 @@ class OrderExecutor:
         self._clob_client: Optional[ClobClient] = None
         self._execution_history: list[ExecutionResult] = []
         self._trade_log = TradeLog()
+        self._active_orders: dict[str, dict] = {}  # Track active orders for dashboard
 
         # Initialize CLOB client if credentials available
         if CLOB_CLIENT_AVAILABLE and settings.poly_api_key and settings.poly_api_secret:
@@ -144,6 +150,84 @@ class OrderExecutor:
     async def close(self) -> None:
         """Close resources."""
         pass  # ClobClient doesn't need explicit cleanup
+
+    def _save_orders_state(self) -> None:
+        """Save current orders state to file for dashboard."""
+        try:
+            ORDERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+            # Build orders list from active orders and recent history
+            orders_data = {
+                "active_orders": list(self._active_orders.values()),
+                "recent_executions": [
+                    {
+                        "timestamp": r.timestamp.isoformat(),
+                        "market": r.opportunity.market.question[:60],
+                        "status": r.status.value,
+                        "yes_order": {
+                            "order_id": r.yes_order.order_id,
+                            "status": r.yes_order.status.value,
+                            "price": float(r.yes_order.price),
+                            "size": float(r.yes_order.size),
+                            "filled_size": float(r.yes_order.filled_size),
+                        },
+                        "no_order": {
+                            "order_id": r.no_order.order_id,
+                            "status": r.no_order.status.value,
+                            "price": float(r.no_order.price),
+                            "size": float(r.no_order.size),
+                            "filled_size": float(r.no_order.filled_size),
+                        },
+                        "total_cost": float(r.total_cost),
+                        "expected_profit": float(r.expected_profit),
+                    }
+                    for r in self._execution_history[-20:]  # Last 20 executions
+                ],
+                "stats": self.get_stats(),
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+
+            with open(ORDERS_FILE, "w") as f:
+                json.dump(orders_data, f)
+        except Exception as e:
+            log.debug("Failed to save orders state", error=str(e))
+
+    def _track_order(
+        self,
+        order_id: str,
+        market: str,
+        side: str,
+        outcome: str,
+        price: float,
+        size: float,
+        status: str,
+    ) -> None:
+        """Track an order for dashboard visibility."""
+        self._active_orders[order_id] = {
+            "order_id": order_id,
+            "market": market[:60],
+            "side": side,
+            "outcome": outcome,
+            "price": price,
+            "size": size,
+            "status": status,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        self._save_orders_state()
+
+    def _update_order_status(self, order_id: str, status: str, filled_size: float = 0) -> None:
+        """Update order status for dashboard."""
+        if order_id in self._active_orders:
+            self._active_orders[order_id]["status"] = status
+            self._active_orders[order_id]["filled_size"] = filled_size
+            self._active_orders[order_id]["updated_at"] = datetime.utcnow().isoformat()
+
+            # Remove from active if terminal state
+            if status in ("filled", "cancelled", "failed"):
+                del self._active_orders[order_id]
+
+            self._save_orders_state()
 
     def _submit_order_sync(self, token_id: str, side: str, price: float, size: float) -> dict[str, Any]:
         """
@@ -578,6 +662,29 @@ class OrderExecutor:
             opportunity.max_trade_size,
         )
 
+        # Track orders for dashboard visibility
+        market_name = opportunity.market.question[:60]
+        if yes_result.order_id:
+            self._track_order(
+                order_id=yes_result.order_id,
+                market=market_name,
+                side="BUY",
+                outcome="YES",
+                price=float(opportunity.yes_ask),
+                size=float(opportunity.max_trade_size),
+                status=yes_result.status.value,
+            )
+        if no_result.order_id:
+            self._track_order(
+                order_id=no_result.order_id,
+                market=market_name,
+                side="BUY",
+                outcome="NO",
+                price=float(opportunity.no_ask),
+                size=float(opportunity.max_trade_size),
+                status=no_result.status.value,
+            )
+
         # If orders were submitted but not immediately filled, wait and monitor
         yes_needs_monitoring = yes_result.status == ExecutionStatus.SUBMITTED and yes_result.order_id
         no_needs_monitoring = no_result.status == ExecutionStatus.SUBMITTED and no_result.order_id
@@ -601,18 +708,22 @@ class OrderExecutor:
                 if status_str in ("filled", "matched"):
                     yes_result.status = ExecutionStatus.FILLED
                     yes_result.filled_size = opportunity.max_trade_size
+                    self._update_order_status(yes_result.order_id, "filled", float(opportunity.max_trade_size))
                 elif status_str in ("cancelled", "canceled"):
                     yes_result.status = ExecutionStatus.CANCELLED
                     yes_result.filled_size = Decimal("0")
+                    self._update_order_status(yes_result.order_id, "cancelled", 0)
 
             if no_needs_monitoring and no_final_status:
                 status_str = no_final_status.get("status", "").lower()
                 if status_str in ("filled", "matched"):
                     no_result.status = ExecutionStatus.FILLED
                     no_result.filled_size = opportunity.max_trade_size
+                    self._update_order_status(no_result.order_id, "filled", float(opportunity.max_trade_size))
                 elif status_str in ("cancelled", "canceled"):
                     no_result.status = ExecutionStatus.CANCELLED
                     no_result.filled_size = Decimal("0")
+                    self._update_order_status(no_result.order_id, "cancelled", 0)
 
         # Determine overall status
         if yes_result.status == ExecutionStatus.FILLED and no_result.status == ExecutionStatus.FILLED:
@@ -690,6 +801,9 @@ class OrderExecutor:
             yes_status=yes_result.status.value,
             no_status=no_result.status.value,
         )
+
+        # Save final orders state for dashboard
+        self._save_orders_state()
 
         return result
 
