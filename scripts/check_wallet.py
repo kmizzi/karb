@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Check wallet balance and allowances for Polymarket."""
 
+import os
+import sys
 from web3 import Web3
 
 RPC_URL = "https://polygon-rpc.com"
@@ -29,7 +31,10 @@ ERC20_ABI = [
 ]
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
-wallet = "0xb05f647DB67bE5351Bc7e5F51B3825E0a8FF7434"
+wallet = os.environ.get("WALLET_ADDRESS")
+if not wallet:
+    print("Error: WALLET_ADDRESS environment variable not set")
+    sys.exit(1)
 
 usdc = w3.eth.contract(address=Web3.to_checksum_address(USDC_E), abi=ERC20_ABI)
 
