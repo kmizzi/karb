@@ -347,10 +347,20 @@ class RealtimeScanner:
             resolves_in=f"{days_until_resolution}d" if days_until_resolution is not None else "unknown",
         )
 
-        # Save alert to file for dashboard
-        self._save_alert(alert)
+        # Trigger callback FIRST - execution is time-critical
+        if self._on_arbitrage:
+            try:
+                result = self._on_arbitrage(alert)
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
+            except Exception as e:
+                log.error("Arbitrage callback error", error=str(e))
 
-        # Send Slack notification
+        # Save alert to file for dashboard (non-blocking, runs in background)
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, self._save_alert, alert)
+
+        # Send Slack notification (already async)
         try:
             notifier = get_notifier()
             asyncio.create_task(notifier.notify_arbitrage(
@@ -362,15 +372,6 @@ class RealtimeScanner:
             ))
         except Exception as e:
             log.debug("Slack notification failed", error=str(e))
-
-        # Trigger callback
-        if self._on_arbitrage:
-            try:
-                result = self._on_arbitrage(alert)
-                if asyncio.iscoroutine(result):
-                    asyncio.create_task(result)
-            except Exception as e:
-                log.error("Arbitrage callback error", error=str(e))
 
     async def run(self) -> None:
         """Run the real-time scanner."""
