@@ -135,6 +135,6 @@
 - name: Open firewall for dashboard (if ufw is active)
   ufw:
     rule: allow
-    port: "8080"
+    port: "80"
     proto: tcp
   ignore_errors: yes

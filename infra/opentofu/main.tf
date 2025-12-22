@@ -125,12 +125,12 @@ resource "aws_security_group" "bot_sg" {
     description = "SSH access"
   }
 
-  # Dashboard (optional - can restrict to your IP)
+  # Dashboard (HTTP - public)
   ingress {
-    from_port   = 8080
-    to_port     = 8080
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = var.dashboard_allowed_cidrs
+    cidr_blocks = ["0.0.0.0/0"]
     description = "Dashboard access"
   }
 

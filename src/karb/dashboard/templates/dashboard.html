@@ -573,28 +573,6 @@
                 </div>
             </div>
 
-            <!-- Cross-Platform Matches Card -->
-            <div class="card" id="crossplatform-card">
-                <div class="card-header">
-                    <span class="card-title">Cross-Platform</span>
-                    <span class="card-icon">🔗</span>
-                </div>
-                <div id="crossplatform-content">
-                    <div class="stat-row">
-                        <span>Matched Markets</span>
-                        <span id="xp-matches">--</span>
-                    </div>
-                    <div class="stat-row">
-                        <span>Kalshi Status</span>
-                        <span id="xp-kalshi-status">--</span>
-                    </div>
-                    <div class="stat-row" style="border-bottom: none; padding-top: 16px;">
-                        <button class="btn" id="btn-view-matches" onclick="openMatchesModal()">
-                            View Matched Markets
-                        </button>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- Live Activity Feed -->
@@ -648,40 +626,6 @@
                 </div>
                 <div class="table-container" id="trades-container">
                     <div class="empty-state">No trades yet</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Cross-Platform Matches Modal -->
-    <div class="modal-overlay" id="matches-modal">
-        <div class="modal">
-            <div class="modal-header">
-                <span class="modal-title">Cross-Platform Market Matches</span>
-                <button class="modal-close" onclick="closeMatchesModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="modal-stats" id="matches-stats">
-                    <div class="modal-stat">
-                        <div class="modal-stat-value" id="modal-poly-count">--</div>
-                        <div class="modal-stat-label">Polymarket</div>
-                    </div>
-                    <div class="modal-stat">
-                        <div class="modal-stat-value" id="modal-kalshi-count">--</div>
-                        <div class="modal-stat-label">Kalshi</div>
-                    </div>
-                    <div class="modal-stat">
-                        <div class="modal-stat-value" id="modal-match-count">--</div>
-                        <div class="modal-stat-label">Matched</div>
-                    </div>
-                    <div style="margin-left: auto;">
-                        <button class="btn btn-primary" id="btn-refresh-matches" onclick="fetchCrossplatformMatches(true)">
-                            Refresh Matches
-                        </button>
-                    </div>
-                </div>
-                <div id="matches-list">
-                    <div class="empty-state">Click "Refresh Matches" to scan both platforms...</div>
                 </div>
             </div>
         </div>
@@ -767,10 +711,6 @@
                         <div class="stat-row">
                             <span>Polymarket (USDC)</span>
                             <span>$${data.polymarket_usdc.toFixed(2)}</span>
-                        </div>
-                        <div class="stat-row">
-                            <span>Kalshi (USD)</span>
-                            <span>$${data.kalshi_usd.toFixed(2)}</span>
                         </div>
                     `;
                 }
@@ -1047,116 +987,6 @@
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
 
         addLogLine('info', 'Live updates enabled');
-
-        // Cross-platform matches
-        let matchesData = null;
-
-        function openMatchesModal() {
-            document.getElementById('matches-modal').classList.add('active');
-            // Load cached data first
-            if (!matchesData) {
-                fetchCrossplatformMatches(false);
-            }
-        }
-
-        function closeMatchesModal() {
-            document.getElementById('matches-modal').classList.remove('active');
-        }
-
-        // Close modal on escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeMatchesModal();
-        });
-
-        // Close modal on overlay click
-        document.getElementById('matches-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'matches-modal') closeMatchesModal();
-        });
-
-        async function fetchCrossplatformMatches(refresh = false) {
-            const btn = document.getElementById('btn-refresh-matches');
-            const listEl = document.getElementById('matches-list');
-
-            // Show loading state
-            btn.disabled = true;
-            btn.innerHTML = '<span class="loading-spinner"></span> Loading...';
-
-            if (refresh) {
-                listEl.innerHTML = '<div class="empty-state">Fetching markets from Polymarket and Kalshi...</div>';
-                addLogLine('info', 'Scanning cross-platform markets...');
-            }
-
-            try {
-                const resp = await fetch(`/api/crossplatform/matches?refresh=${refresh}`);
-                const data = await resp.json();
-                matchesData = data;
-
-                // Update stats
-                document.getElementById('modal-poly-count').textContent = data.poly_markets || '--';
-                document.getElementById('modal-kalshi-count').textContent = data.kalshi_markets || '--';
-                document.getElementById('modal-match-count').textContent = data.count || 0;
-
-                // Update card stats
-                document.getElementById('xp-matches').textContent = data.count || 0;
-                document.getElementById('xp-kalshi-status').innerHTML = data.kalshi_markets > 0
-                    ? '<span class="positive">Connected</span>'
-                    : '<span class="negative">Unavailable</span>';
-
-                if (data.error) {
-                    listEl.innerHTML = `<div class="empty-state" style="color: var(--accent-red);">Error: ${data.error}</div>`;
-                    addLogLine('error', `Cross-platform scan failed: ${data.error}`);
-                } else if (!data.matches || data.matches.length === 0) {
-                    listEl.innerHTML = '<div class="empty-state">No matched markets found. Try clicking "Refresh Matches" to scan.</div>';
-                    if (refresh) addLogLine('info', 'No cross-platform matches found');
-                } else {
-                    // Render matches
-                    listEl.innerHTML = data.matches.map(m => {
-                        const confClass = m.confidence >= 0.8 ? 'high' : m.confidence >= 0.6 ? 'medium' : 'low';
-                        const spreadClass = m.spread_pct && m.spread_pct >= 2 ? 'opportunity' : '';
-                        const spreadText = m.spread_pct !== null ? `${m.spread_pct.toFixed(1)}%` : '--';
-
-                        return `
-                            <div class="match-item">
-                                <div class="match-platform">
-                                    <div class="match-platform-label">Polymarket</div>
-                                    <div class="match-question">${m.polymarket.question}</div>
-                                    <div class="match-price">
-                                        <div class="match-price-value">${m.polymarket.yes_price ? '$' + m.polymarket.yes_price.toFixed(2) : '--'}</div>
-                                    </div>
-                                </div>
-                                <div class="match-arrow">↔</div>
-                                <div class="match-platform">
-                                    <div class="match-platform-label">Kalshi</div>
-                                    <div class="match-question">${m.kalshi.title} (${m.kalshi.ticker})</div>
-                                    <div class="match-price">
-                                        <div class="match-price-value">${m.kalshi.yes_price ? '$' + m.kalshi.yes_price.toFixed(2) : '--'}</div>
-                                    </div>
-                                </div>
-                                <div class="match-meta">
-                                    <span class="match-confidence ${confClass}">${(m.confidence * 100).toFixed(0)}% conf</span>
-                                    <span class="match-spread ${spreadClass}">Spread: ${spreadText}</span>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-
-                    if (refresh) {
-                        addLogLine('info', `Found ${data.count} cross-platform matches (Poly: ${data.poly_markets}, Kalshi: ${data.kalshi_markets})`);
-                    }
-                }
-
-            } catch (e) {
-                console.error('Crossplatform fetch error:', e);
-                listEl.innerHTML = '<div class="empty-state" style="color: var(--accent-red);">Failed to fetch matches</div>';
-                addLogLine('error', 'Failed to fetch cross-platform matches');
-            }
-
-            btn.disabled = false;
-            btn.innerHTML = 'Refresh Matches';
-        }
-
-        // Load cached matches on page load
-        fetchCrossplatformMatches(false);
     </script>
 </body>
 </html>

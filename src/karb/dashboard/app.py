@@ -29,16 +29,30 @@ STATS_FILE = Path.home() / ".karb" / "scanner_stats.json"
 ALERTS_FILE = Path.home() / ".karb" / "scanner_alerts.json"
 ORDERS_FILE = Path.home() / ".karb" / "orders.json"
 
-security = HTTPBasic()
+security = HTTPBasic(auto_error=False)
 
 
-def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    """Verify dashboard credentials."""
+def verify_credentials(
+    credentials: Optional[HTTPBasicCredentials] = Depends(security),
+) -> Optional[str]:
+    """Verify dashboard credentials if authentication is enabled."""
     settings = get_settings()
+
+    # If no password configured, allow anonymous access
+    if not settings.dashboard_password:
+        return "anonymous"
+
+    # If password is configured but no credentials provided, require auth
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Basic"},
+        )
 
     correct_username = secrets.compare_digest(
         credentials.username.encode("utf8"),
-        settings.dashboard_username.encode("utf8"),
+        (settings.dashboard_username or "admin").encode("utf8"),
     )
     correct_password = secrets.compare_digest(
         credentials.password.encode("utf8"),
@@ -203,15 +217,11 @@ def create_app() -> FastAPI:
     return app
 
 
-def run_dashboard(host: str = "0.0.0.0", port: int = 8080):
+def run_dashboard(host: str = "0.0.0.0", port: int = 80):
     """Run the dashboard server."""
     import uvicorn
 
     settings = get_settings()
-
-    if not settings.dashboard_username or not settings.dashboard_password:
-        log.error("Dashboard credentials not configured. Set DASHBOARD_USERNAME and DASHBOARD_PASSWORD in .env")
-        return
 
     log.info("Starting dashboard", host=host, port=port)
 

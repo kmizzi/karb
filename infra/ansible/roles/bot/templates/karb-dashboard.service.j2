@@ -8,9 +8,12 @@ User=karb
 Group=karb
 WorkingDirectory=/opt/karb
 EnvironmentFile=/opt/karb/.env
-ExecStart=/opt/karb/venv/bin/karb dashboard --host 0.0.0.0 --port 8080
+ExecStart=/opt/karb/venv/bin/karb dashboard --host 0.0.0.0 --port 80
 Restart=always
 RestartSec=10
+
+# Allow binding to port 80 without root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 # Logging
 StandardOutput=journal
@@ -18,7 +21,6 @@ StandardError=journal
 SyslogIdentifier=karb-dashboard
 
 # Security hardening
-NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/home/karb/.karb
