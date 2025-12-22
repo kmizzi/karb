@@ -5,10 +5,15 @@ variable "ssh_public_key" {
   type        = string
 }
 
-variable "cloudflare_api_token" {
-  description = "Cloudflare API token with DNS edit permissions"
+variable "cloudflare_api_key" {
+  description = "Cloudflare Global API Key"
   type        = string
   sensitive   = true
+}
+
+variable "cloudflare_email" {
+  description = "Cloudflare account email"
+  type        = string
 }
 
 variable "ssh_allowed_cidrs" {

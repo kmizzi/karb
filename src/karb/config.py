@@ -173,13 +173,17 @@ class Settings(BaseSettings):
         return self.private_key is not None and self.wallet_address is not None
 
     def get_socks5_proxy_url(self) -> Optional[str]:
-        """Get SOCKS5 proxy URL if configured."""
+        """Get SOCKS5 proxy URL if configured.
+
+        Uses socks5h:// scheme to ensure DNS resolution happens through the proxy,
+        which is required for geo-restriction bypass.
+        """
         if not self.socks5_proxy_host:
             return None
         if self.socks5_proxy_user and self.socks5_proxy_pass:
             password = self.socks5_proxy_pass.get_secret_value()
-            return f"socks5://{self.socks5_proxy_user}:{password}@{self.socks5_proxy_host}:{self.socks5_proxy_port}"
-        return f"socks5://{self.socks5_proxy_host}:{self.socks5_proxy_port}"
+            return f"socks5h://{self.socks5_proxy_user}:{password}@{self.socks5_proxy_host}:{self.socks5_proxy_port}"
+        return f"socks5h://{self.socks5_proxy_host}:{self.socks5_proxy_port}"
 
     def is_proxy_enabled(self) -> bool:
         """Check if SOCKS5 proxy is configured."""

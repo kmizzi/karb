@@ -42,27 +42,54 @@
     group: karb
     mode: '0755'
 
-- name: Clone/update karb repository
-  git:
-    repo: "{{ karb_repo }}"
-    dest: /opt/karb
-    version: "{{ karb_branch }}"
-    force: yes
-  become_user: karb
+- name: Add /opt/karb to git safe directories
+  command: git config --global --add safe.directory /opt/karb
+  changed_when: false
+
+- name: Check if repo already cloned
+  stat:
+    path: /opt/karb/.git
+  register: git_exists
+
+- name: Clone karb repository
+  command: git clone {{ karb_repo }} /opt/karb
+  when: not git_exists.stat.exists
+
+- name: Update karb repository
+  command: git pull origin {{ karb_branch }}
+  args:
+    chdir: /opt/karb
+  when: git_exists.stat.exists
+  register: git_pull
+  changed_when: "'Already up to date' not in git_pull.stdout"
   notify: Restart karb
+
+- name: Set ownership of karb directory
+  file:
+    path: /opt/karb
+    state: directory
+    owner: karb
+    group: karb
+    recurse: yes
 
 - name: Create Python virtual environment
   command: python3 -m venv /opt/karb/venv
   args:
     creates: /opt/karb/venv
-  become_user: karb
+
+- name: Set ownership of venv
+  file:
+    path: /opt/karb/venv
+    state: directory
+    owner: karb
+    group: karb
+    recurse: yes
 
 - name: Install karb package
   pip:
     name: /opt/karb
     editable: yes
     virtualenv: /opt/karb/venv
-  become_user: karb
   notify: Restart karb
 
 - name: Create .env file from template

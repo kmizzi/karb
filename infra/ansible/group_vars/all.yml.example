@@ -6,11 +6,11 @@
 karb_repo: "https://github.com/kmizzi/karb.git"
 karb_branch: "master"
 
-# Proxy configuration (filled in after tofu apply)
-proxy_host: "REPLACE_WITH_PROXY_IP"
+# Proxy configuration
+proxy_host: "karb-proxy.arkets.com"
 proxy_port: 1080
 proxy_user: "karb"
-proxy_pass: "GENERATE_SECURE_PASSWORD"
+proxy_pass: "K4rb_Pr0xy_2024!"
 
 # Wallet (KEEP SECRET!)
 private_key: "0x..."
