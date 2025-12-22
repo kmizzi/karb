@@ -264,6 +264,8 @@ class RealtimeArbitrageBot:
             no_ask=alert.no_ask,
             combined_cost=alert.combined_cost,
             profit_pct=alert.profit_pct,
+            yes_size_available=alert.yes_size_available,
+            no_size_available=alert.no_size_available,
             max_trade_size=Decimal(str(settings.max_position_size)),
         )
 

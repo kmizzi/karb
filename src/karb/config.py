@@ -59,6 +59,12 @@ class Settings(BaseSettings):
         description="Minimum liquidity in USD to consider a market",
         ge=0.0,
     )
+    max_days_until_resolution: int = Field(
+        default=7,
+        description="Maximum days until market resolution (skip markets resolving later)",
+        ge=1,
+        le=365,
+    )
 
     # API Endpoints
     clob_base_url: str = Field(
@@ -68,6 +74,20 @@ class Settings(BaseSettings):
     gamma_base_url: str = Field(
         default="https://gamma-api.polymarket.com",
         description="Polymarket Gamma API base URL",
+    )
+
+    # Polymarket API Credentials (L2 Auth) - generated from private key
+    poly_api_key: Optional[str] = Field(
+        default=None,
+        description="Polymarket API key for L2 authentication",
+    )
+    poly_api_secret: Optional[SecretStr] = Field(
+        default=None,
+        description="Polymarket API secret for L2 authentication",
+    )
+    poly_api_passphrase: Optional[SecretStr] = Field(
+        default=None,
+        description="Polymarket API passphrase for L2 authentication",
     )
 
     # Kalshi Configuration

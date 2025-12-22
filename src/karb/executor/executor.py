@@ -7,16 +7,23 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Optional
 
-import aiohttp
-
 from karb.api.models import ArbitrageOpportunity
 from karb.config import get_settings
-from karb.executor.signer import OrderSide, OrderSigner, SignedOrder
+from karb.executor.signer import OrderSide, OrderSigner
 from karb.notifications.slack import get_notifier
 from karb.tracking.trades import Trade, TradeLog
 from karb.utils.logging import get_logger
 
 log = get_logger(__name__)
+
+# Import Polymarket client
+try:
+    from py_clob_client.client import ClobClient
+    from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType
+    CLOB_CLIENT_AVAILABLE = True
+except ImportError:
+    CLOB_CLIENT_AVAILABLE = False
+    log.warning("py-clob-client not installed, order execution will fail")
 
 
 class ExecutionStatus(Enum):
@@ -102,54 +109,63 @@ class OrderExecutor:
         self.clob_base_url = (clob_base_url or settings.clob_base_url).rstrip("/")
 
         self.stats = ExecutorStats()
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._clob_client: Optional[ClobClient] = None
         self._execution_history: list[ExecutionResult] = []
         self._trade_log = TradeLog()
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session."""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
-                timeout=aiohttp.ClientTimeout(total=30),
-            )
-        return self._session
+        # Initialize CLOB client if credentials available
+        if CLOB_CLIENT_AVAILABLE and settings.poly_api_key and settings.poly_api_secret:
+            try:
+                private_key = settings.private_key.get_secret_value() if settings.private_key else None
+                creds = ApiCreds(
+                    api_key=settings.poly_api_key,
+                    api_secret=settings.poly_api_secret.get_secret_value(),
+                    api_passphrase=settings.poly_api_passphrase.get_secret_value() if settings.poly_api_passphrase else "",
+                )
+                self._clob_client = ClobClient(
+                    host=self.clob_base_url,
+                    key=private_key,
+                    chain_id=settings.chain_id,
+                    creds=creds,
+                    signature_type=0,  # EOA wallet
+                    funder=settings.wallet_address,
+                )
+                log.info("CLOB client initialized with L2 credentials", wallet=settings.wallet_address)
+            except Exception as e:
+                log.error("Failed to initialize CLOB client", error=str(e))
+                self._clob_client = None
 
     async def close(self) -> None:
-        """Close HTTP session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
-            self._session = None
+        """Close resources."""
+        pass  # ClobClient doesn't need explicit cleanup
 
-    async def _submit_order(self, signed_order: SignedOrder) -> dict[str, Any]:
+    def _submit_order_sync(self, token_id: str, side: str, price: float, size: float) -> dict[str, Any]:
         """
-        Submit a signed order to the CLOB API.
+        Submit an order using the official CLOB client.
 
         Args:
-            signed_order: The signed order to submit
+            token_id: The token ID to trade
+            side: "BUY" or "SELL"
+            price: Price per token
+            size: Number of tokens
 
         Returns:
             API response
         """
-        session = await self._get_session()
-        url = f"{self.clob_base_url}/order"
-
-        payload = self.signer.order_to_api_payload(signed_order)
+        if not self._clob_client:
+            raise RuntimeError("CLOB client not initialized - check API credentials")
 
         try:
-            async with session.post(url, json=payload) as response:
-                data = await response.json()
-                if response.status >= 400:
-                    log.error(
-                        "Order submission failed",
-                        status=response.status,
-                        response=data,
-                    )
-                return data
-        except aiohttp.ClientError as e:
+            order_args = OrderArgs(
+                token_id=token_id,
+                price=price,
+                size=size,
+                side=side,
+            )
+            response = self._clob_client.create_and_post_order(order_args)
+            log.info("Order submitted", token_id=token_id[:10], side=side, response=response)
+            return response
+        except Exception as e:
             log.error("Order submission error", error=str(e))
             raise
 
@@ -291,9 +307,9 @@ class OrderExecutor:
         if self.dry_run:
             return await self.execute_dry_run(opportunity)
 
-        # Check signer configuration
-        if not self.signer.is_configured:
-            log.error("Signer not configured, cannot execute orders")
+        # Check CLOB client is available
+        if not self._clob_client:
+            log.error("CLOB client not initialized, cannot execute orders")
             return ExecutionResult(
                 opportunity=opportunity,
                 yes_order=OrderResult(
@@ -302,7 +318,7 @@ class OrderExecutor:
                     price=opportunity.yes_ask,
                     size=opportunity.max_trade_size,
                     status=ExecutionStatus.FAILED,
-                    error="Signer not configured",
+                    error="CLOB client not initialized - check POLY_API_KEY/SECRET",
                 ),
                 no_order=OrderResult(
                     token_id=opportunity.market.no_token.token_id,
@@ -310,7 +326,7 @@ class OrderExecutor:
                     price=opportunity.no_ask,
                     size=opportunity.max_trade_size,
                     status=ExecutionStatus.FAILED,
-                    error="Signer not configured",
+                    error="CLOB client not initialized - check POLY_API_KEY/SECRET",
                 ),
                 status=ExecutionStatus.FAILED,
             )
@@ -323,54 +339,28 @@ class OrderExecutor:
             size=float(opportunity.max_trade_size),
         )
 
-        # Create orders
-        yes_order_data = self.signer.create_order(
-            token_id=opportunity.market.yes_token.token_id,
-            side=OrderSide.BUY,
-            price=opportunity.yes_ask,
-            size=opportunity.max_trade_size,
-        )
+        # Submit orders using official CLOB client
+        # Run in executor since py-clob-client is synchronous
+        loop = asyncio.get_event_loop()
 
-        no_order_data = self.signer.create_order(
-            token_id=opportunity.market.no_token.token_id,
-            side=OrderSide.BUY,
-            price=opportunity.no_ask,
-            size=opportunity.max_trade_size,
-        )
-
-        # Sign orders
-        try:
-            yes_signed = self.signer.sign_order(yes_order_data)
-            no_signed = self.signer.sign_order(no_order_data)
-        except Exception as e:
-            log.error("Failed to sign orders", error=str(e))
-            self.stats.failed += 1
-            return ExecutionResult(
-                opportunity=opportunity,
-                yes_order=OrderResult(
-                    token_id=opportunity.market.yes_token.token_id,
-                    side=OrderSide.BUY,
-                    price=opportunity.yes_ask,
-                    size=opportunity.max_trade_size,
-                    status=ExecutionStatus.FAILED,
-                    error=f"Signing failed: {e}",
-                ),
-                no_order=OrderResult(
-                    token_id=opportunity.market.no_token.token_id,
-                    side=OrderSide.BUY,
-                    price=opportunity.no_ask,
-                    size=opportunity.max_trade_size,
-                    status=ExecutionStatus.FAILED,
-                    error=f"Signing failed: {e}",
-                ),
-                status=ExecutionStatus.FAILED,
-            )
-
-        # Submit orders concurrently
         try:
             yes_response, no_response = await asyncio.gather(
-                self._submit_order(yes_signed),
-                self._submit_order(no_signed),
+                loop.run_in_executor(
+                    None,
+                    self._submit_order_sync,
+                    opportunity.market.yes_token.token_id,
+                    "BUY",
+                    float(opportunity.yes_ask),
+                    float(opportunity.max_trade_size),
+                ),
+                loop.run_in_executor(
+                    None,
+                    self._submit_order_sync,
+                    opportunity.market.no_token.token_id,
+                    "BUY",
+                    float(opportunity.no_ask),
+                    float(opportunity.max_trade_size),
+                ),
                 return_exceptions=True,
             )
         except Exception as e:

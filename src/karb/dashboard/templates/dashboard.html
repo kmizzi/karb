@@ -818,18 +818,27 @@
                         <div class="empty-state">Monitoring for opportunities...</div>
                     `;
                 } else {
-                    document.getElementById('alerts-container').innerHTML = data.alerts.slice().reverse().map(alert => `
+                    document.getElementById('alerts-container').innerHTML = data.alerts.slice().reverse().map(alert => {
+                        const platform = (alert.platform || 'polymarket').toUpperCase();
+                        const daysUntil = alert.days_until_resolution !== null && alert.days_until_resolution !== undefined
+                            ? `${alert.days_until_resolution}d`
+                            : '?';
+                        return `
                         <div class="alert-item">
-                            <div class="alert-market">${alert.market || 'Unknown Market'}</div>
+                            <div class="alert-market">
+                                <span style="color: ${platform === 'KALSHI' ? '#ff9800' : '#4caf50'}; font-weight: bold; margin-right: 6px;">[${platform}]</span>
+                                ${alert.market || 'Unknown Market'}
+                            </div>
                             <div class="alert-details">
                                 YES: $${(alert.yes_ask || 0).toFixed(4)} +
                                 NO: $${(alert.no_ask || 0).toFixed(4)} =
                                 $${(alert.combined || 0).toFixed(4)}
                                 <span class="alert-profit">+${((alert.profit || 0) * 100).toFixed(2)}%</span>
+                                <span style="margin-left: 8px; color: #888;">resolves: ${daysUntil}</span>
                             </div>
                             <div class="alert-details">${alert.timestamp || ''}</div>
                         </div>
-                    `).join('');
+                    `}).join('');
                 }
             } catch (e) {
                 console.error('Alerts fetch error:', e);

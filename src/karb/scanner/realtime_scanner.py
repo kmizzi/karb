@@ -3,6 +3,7 @@
 import asyncio
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Optional
@@ -36,6 +37,9 @@ class MarketPrices:
     yes_best_ask: Optional[Decimal] = None
     no_best_bid: Optional[Decimal] = None
     no_best_ask: Optional[Decimal] = None
+    # Size available at best ask prices
+    yes_best_ask_size: Optional[Decimal] = None
+    no_best_ask_size: Optional[Decimal] = None
 
     @property
     def combined_ask(self) -> Optional[Decimal]:
@@ -71,6 +75,9 @@ class ArbitrageAlert:
     combined_cost: Decimal
     profit_pct: Decimal
     timestamp: float
+    # Size available at ask prices
+    yes_size_available: Decimal = Decimal("0")
+    no_size_available: Decimal = Decimal("0")
 
 
 # Callback type for arbitrage alerts
@@ -162,19 +169,40 @@ class RealtimeScanner:
 
     def _on_book_update(self, update: OrderBookUpdate) -> None:
         """Handle orderbook snapshot update."""
+        # Get size at best ask price
+        best_ask_size = None
+        if update.asks:
+            best_ask_price = min(a.price for a in update.asks)
+            for a in update.asks:
+                if a.price == best_ask_price:
+                    best_ask_size = a.size
+                    break
+
         self._update_prices(
             update.asset_id,
             update.best_bid,
             update.best_ask,
+            best_ask_size,
         )
 
     def _on_price_change(self, change: PriceChange) -> None:
         """Handle real-time price change."""
         self._price_updates += 1
+        # For price changes, get size from cached orderbook
+        best_ask_size = None
+        orderbook = self.ws_client.get_orderbook(change.asset_id)
+        if orderbook and orderbook.asks:
+            best_ask_price = min(a.price for a in orderbook.asks)
+            for a in orderbook.asks:
+                if a.price == best_ask_price:
+                    best_ask_size = a.size
+                    break
+
         self._update_prices(
             change.asset_id,
             change.best_bid,
             change.best_ask,
+            best_ask_size,
         )
 
     def _update_prices(
@@ -182,6 +210,7 @@ class RealtimeScanner:
         token_id: str,
         best_bid: Optional[Decimal],
         best_ask: Optional[Decimal],
+        best_ask_size: Optional[Decimal] = None,
     ) -> None:
         """Update prices for a token and check for arbitrage."""
         market_id = self._token_to_market.get(token_id)
@@ -200,9 +229,13 @@ class RealtimeScanner:
         if token_id == market.yes_token.token_id:
             prices.yes_best_bid = best_bid
             prices.yes_best_ask = best_ask
+            if best_ask_size is not None:
+                prices.yes_best_ask_size = best_ask_size
         elif token_id == market.no_token.token_id:
             prices.no_best_bid = best_bid
             prices.no_best_ask = best_ask
+            if best_ask_size is not None:
+                prices.no_best_ask_size = best_ask_size
 
         # Check for arbitrage
         self._check_arbitrage(prices)
@@ -211,6 +244,24 @@ class RealtimeScanner:
         """Check if market has arbitrage opportunity and trigger alert."""
         if not prices.has_arbitrage:
             return
+
+        # Check resolution date - skip markets that resolve too far in the future
+        settings = get_settings()
+        if prices.market.end_date:
+            now = datetime.now(timezone.utc)
+            # Make end_date timezone-aware if it isn't
+            end_date = prices.market.end_date
+            if end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
+            days_until = (end_date - now).days
+            if days_until > settings.max_days_until_resolution:
+                log.debug(
+                    "Skipping arbitrage - resolution too far",
+                    market=prices.market.question[:30],
+                    days_until=days_until,
+                    max_days=settings.max_days_until_resolution,
+                )
+                return
 
         # We have an opportunity!
         combined = prices.combined_ask
@@ -228,7 +279,18 @@ class RealtimeScanner:
             combined_cost=combined,
             profit_pct=profit,
             timestamp=asyncio.get_event_loop().time(),
+            yes_size_available=prices.yes_best_ask_size or Decimal("0"),
+            no_size_available=prices.no_best_ask_size or Decimal("0"),
         )
+
+        # Calculate days until resolution for logging
+        days_until_resolution = None
+        if prices.market.end_date:
+            now = datetime.now(timezone.utc)
+            end_date = prices.market.end_date
+            if end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
+            days_until_resolution = (end_date - now).days
 
         log.info(
             "ARBITRAGE DETECTED",
@@ -237,6 +299,7 @@ class RealtimeScanner:
             no_ask=f"${float(alert.no_ask):.4f}",
             combined=f"${float(alert.combined_cost):.4f}",
             profit=f"{float(alert.profit_pct) * 100:.2f}%",
+            resolves_in=f"{days_until_resolution}d" if days_until_resolution is not None else "unknown",
         )
 
         # Save alert to file for dashboard
@@ -364,8 +427,16 @@ class RealtimeScanner:
                 with open(ALERTS_FILE) as f:
                     alerts = json.load(f)
 
+            # Calculate days until resolution
+            days_until = None
+            if alert.market.end_date:
+                now = datetime.now(timezone.utc)
+                end_date = alert.market.end_date
+                if end_date.tzinfo is None:
+                    end_date = end_date.replace(tzinfo=timezone.utc)
+                days_until = (end_date - now).days
+
             # Add new alert
-            from datetime import datetime
             alerts.append({
                 "market": alert.market.question[:60],
                 "yes_ask": float(alert.yes_ask),
@@ -373,6 +444,8 @@ class RealtimeScanner:
                 "combined": float(alert.combined_cost),
                 "profit": float(alert.profit_pct),
                 "timestamp": datetime.now().isoformat(),
+                "platform": "polymarket",
+                "days_until_resolution": days_until,
             })
 
             # Keep only last 50 alerts
