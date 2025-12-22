@@ -30,6 +30,7 @@ dependencies = [
     "py-clob-client>=0.18.0",
     "pysocks>=1.7.0",
     "requests[socks]>=2.28.0",
+    "httpx[socks]>=0.25.0",
 ]
 
 [project.optional-dependencies]
