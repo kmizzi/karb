@@ -125,13 +125,13 @@ resource "aws_security_group" "bot_sg" {
     description = "SSH access"
   }
 
-  # Dashboard (HTTP - for Let's Encrypt challenge)
+  # Dashboard (HTTP - for LetsEncrypt challenge)
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTP for Let's Encrypt"
+    description = "HTTP for LetsEncrypt"
   }
 
   # Dashboard (HTTPS)

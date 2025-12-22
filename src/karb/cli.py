@@ -619,19 +619,15 @@ def dashboard(host: str, port: Optional[int]) -> None:
     """Run the web dashboard."""
     settings = get_settings()
 
-    if not settings.dashboard_password:
-        console.print(
-            "[red]Error:[/red] Dashboard password not configured.\n"
-            "Set DASHBOARD_PASSWORD in your .env file."
-        )
-        sys.exit(1)
-
     actual_port = port or settings.dashboard_port
 
     console.print(f"\n[bold]Starting Karb Dashboard[/bold]")
     console.print(f"[dim]URL:[/dim] http://{host}:{actual_port}")
-    console.print(f"[dim]Username:[/dim] {settings.dashboard_username}")
-    console.print(f"[dim]Password:[/dim] {'*' * len(settings.dashboard_password)}")
+    if settings.dashboard_password:
+        console.print(f"[dim]Username:[/dim] {settings.dashboard_username}")
+        console.print(f"[dim]Password:[/dim] {'*' * len(settings.dashboard_password)}")
+    else:
+        console.print(f"[dim]Auth:[/dim] Disabled (no password configured)")
     console.print()
 
     from karb.dashboard import run_dashboard
