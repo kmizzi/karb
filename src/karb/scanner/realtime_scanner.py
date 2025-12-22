@@ -287,6 +287,25 @@ class RealtimeScanner:
 
     def _check_arbitrage(self, prices: MarketPrices) -> None:
         """Check if market has arbitrage opportunity and trigger alert."""
+        # Track near-misses for diagnostics (profit > 0 but below threshold)
+        profit = prices.arbitrage_profit
+        if profit is not None and profit > Decimal("0"):
+            settings = get_settings()
+            # Log near-misses (within 0.5% of threshold) at debug level
+            if profit < Decimal(str(settings.min_profit_threshold)):
+                if profit > Decimal(str(settings.min_profit_threshold)) - Decimal("0.005"):
+                    log.debug(
+                        "Near-miss arbitrage",
+                        market=prices.market.question[:40],
+                        profit=f"{float(profit) * 100:.3f}%",
+                        threshold=f"{settings.min_profit_threshold * 100:.1f}%",
+                        combined=f"${float(prices.combined_ask):.4f}" if prices.combined_ask else "N/A",
+                    )
+                # Track the best near-miss for stats logging
+                if not hasattr(self, '_best_near_miss') or profit > self._best_near_miss:
+                    self._best_near_miss = profit
+                    self._best_near_miss_market = prices.market.question[:40]
+
         if not prices.has_arbitrage:
             return
 
@@ -465,13 +484,30 @@ class RealtimeScanner:
             await asyncio.sleep(interval)
 
             stats = self.get_stats()
+
+            # Include best near-miss in stats if available
+            best_spread = None
+            best_spread_market = None
+            if hasattr(self, '_best_near_miss') and self._best_near_miss:
+                best_spread = f"{float(self._best_near_miss) * 100:.3f}%"
+                best_spread_market = getattr(self, '_best_near_miss_market', None)
+
             log.info(
                 "Scanner stats",
                 markets=stats["markets"],
                 price_updates=stats["price_updates"],
                 arbitrage_alerts=stats["arbitrage_alerts"],
                 ws_connections=stats["ws_connections"],
+                best_spread=best_spread,
             )
+
+            # Log best near-miss market details if significant
+            if best_spread and best_spread_market:
+                log.debug(
+                    "Best spread seen",
+                    market=best_spread_market,
+                    spread=best_spread,
+                )
 
             # Write stats to file for dashboard
             self._write_stats_file(stats)
