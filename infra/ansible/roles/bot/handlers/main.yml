@@ -1,0 +1,14 @@
+---
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Restart karb
+  systemd:
+    name: karb-bot
+    state: restarted
+
+- name: Restart karb-dashboard
+  systemd:
+    name: karb-dashboard
+    state: restarted

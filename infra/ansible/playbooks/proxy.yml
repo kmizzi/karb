@@ -1,0 +1,9 @@
+---
+# Deploy proxy server only
+# Usage: ansible-playbook playbooks/proxy.yml
+
+- name: Deploy proxy server
+  hosts: proxy
+  become: yes
+  roles:
+    - proxy

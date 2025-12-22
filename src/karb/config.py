@@ -90,20 +90,6 @@ class Settings(BaseSettings):
         description="Polymarket API passphrase for L2 authentication",
     )
 
-    # Kalshi Configuration
-    kalshi_api_key: Optional[str] = Field(
-        default=None,
-        description="Kalshi API key ID",
-    )
-    kalshi_private_key: Optional[SecretStr] = Field(
-        default=None,
-        description="Kalshi RSA private key (PEM format)",
-    )
-    kalshi_base_url: str = Field(
-        default="https://api.elections.kalshi.com/trade-api/v2",
-        description="Kalshi API base URL",
-    )
-
     # Alerts (optional)
     telegram_bot_token: Optional[str] = Field(
         default=None,
@@ -144,22 +130,22 @@ class Settings(BaseSettings):
         description="Logging level (DEBUG, INFO, WARNING, ERROR)",
     )
 
-    # LLM Configuration (for AI-powered market matching)
-    llm_provider: str = Field(
-        default="anthropic",
-        description="LLM provider for market matching (anthropic, openai, gemini)",
-    )
-    anthropic_api_key: Optional[str] = Field(
+    # SOCKS5 Proxy (for routing order API calls through non-US server)
+    socks5_proxy_host: Optional[str] = Field(
         default=None,
-        description="Anthropic API key for Claude",
+        description="SOCKS5 proxy hostname or IP",
     )
-    openai_api_key: Optional[str] = Field(
-        default=None,
-        description="OpenAI API key",
+    socks5_proxy_port: int = Field(
+        default=1080,
+        description="SOCKS5 proxy port",
     )
-    google_api_key: Optional[str] = Field(
+    socks5_proxy_user: Optional[str] = Field(
         default=None,
-        description="Google API key for Gemini",
+        description="SOCKS5 proxy username (if authentication required)",
+    )
+    socks5_proxy_pass: Optional[SecretStr] = Field(
+        default=None,
+        description="SOCKS5 proxy password (if authentication required)",
     )
 
     @field_validator("wallet_address", mode="before")
@@ -186,9 +172,18 @@ class Settings(BaseSettings):
         """Check if Polymarket trading credentials are configured."""
         return self.private_key is not None and self.wallet_address is not None
 
-    def is_kalshi_enabled(self) -> bool:
-        """Check if Kalshi credentials are configured."""
-        return self.kalshi_api_key is not None and self.kalshi_private_key is not None
+    def get_socks5_proxy_url(self) -> Optional[str]:
+        """Get SOCKS5 proxy URL if configured."""
+        if not self.socks5_proxy_host:
+            return None
+        if self.socks5_proxy_user and self.socks5_proxy_pass:
+            password = self.socks5_proxy_pass.get_secret_value()
+            return f"socks5://{self.socks5_proxy_user}:{password}@{self.socks5_proxy_host}:{self.socks5_proxy_port}"
+        return f"socks5://{self.socks5_proxy_host}:{self.socks5_proxy_port}"
+
+    def is_proxy_enabled(self) -> bool:
+        """Check if SOCKS5 proxy is configured."""
+        return self.socks5_proxy_host is not None
 
 
 # Global settings instance

@@ -1,0 +1,27 @@
+[Unit]
+Description=Karb Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=karb
+Group=karb
+WorkingDirectory=/opt/karb
+EnvironmentFile=/opt/karb/.env
+ExecStart=/opt/karb/venv/bin/karb dashboard --host 0.0.0.0 --port 8080
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=karb-dashboard
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/karb/.karb
+
+[Install]
+WantedBy=multi-user.target

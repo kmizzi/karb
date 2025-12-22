@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -26,7 +27,36 @@ from karb.utils.logging import get_logger
 
 log = get_logger(__name__)
 
-# Import Polymarket client
+
+def _configure_proxy_for_clob() -> bool:
+    """Configure SOCKS5 proxy for CLOB API calls via environment variables.
+
+    This must be called BEFORE importing py_clob_client so that requests
+    picks up the proxy settings.
+
+    Returns True if proxy was configured.
+    """
+    settings = get_settings()
+    if not settings.is_proxy_enabled():
+        return False
+
+    proxy_url = settings.get_socks5_proxy_url()
+    if proxy_url:
+        # Set both HTTP and HTTPS proxy to the SOCKS5 proxy
+        # This affects all requests made by py_clob_client
+        os.environ["HTTP_PROXY"] = proxy_url
+        os.environ["HTTPS_PROXY"] = proxy_url
+        log.info("Configured SOCKS5 proxy for CLOB API",
+                 proxy_host=settings.socks5_proxy_host,
+                 proxy_port=settings.socks5_proxy_port)
+        return True
+    return False
+
+
+# Configure proxy before importing py_clob_client
+_proxy_enabled = _configure_proxy_for_clob()
+
+# Import Polymarket client (after proxy configuration)
 try:
     from py_clob_client.client import ClobClient
     from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType

@@ -25,7 +25,7 @@ Live trading enabled. Dashboard available at configured domain.
 - Resolution date filtering (configurable, default 7 days max)
 - Web dashboard with live order visibility
 - Slack notifications for trades
-- Cross-platform market matching (Polymarket + Kalshi)
+- SOCKS5 proxy support for geo-restricted order placement
 
 ## Setup
 
@@ -103,7 +103,20 @@ This approves:
 
 ## Geo-Restrictions
 
-Polymarket blocks US IP addresses. The bot must run from a non-US server (EU recommended).
+Polymarket blocks US IP addresses for order placement. The recommended architecture:
+
+- **Bot server (us-east-1)**: Low-latency WebSocket connection for price monitoring
+- **Proxy server (ca-central-1 Montreal)**: SOCKS5 proxy for order placement
+
+Configure the proxy in your `.env`:
+```bash
+SOCKS5_PROXY_HOST=your-proxy-ip
+SOCKS5_PROXY_PORT=1080
+SOCKS5_PROXY_USER=karb
+SOCKS5_PROXY_PASS=your-password
+```
+
+See `infra/` for OpenTofu + Ansible deployment scripts.
 
 ## Documentation
 

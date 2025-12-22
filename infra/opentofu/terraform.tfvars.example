@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and fill in values
+
+# Your SSH public key (contents of ~/.ssh/id_rsa.pub or similar)
+ssh_public_key = "ssh-rsa AAAA... your-key-here"
+
+# Cloudflare API token (create at https://dash.cloudflare.com/profile/api-tokens)
+# Needs: Zone:DNS:Edit permission for arkets.com
+cloudflare_api_token = "your-cloudflare-api-token"
+
+# Restrict SSH access to your IP (recommended)
+# Get your IP: curl -s ifconfig.me
+ssh_allowed_cidrs = ["YOUR_IP/32"]
+
+# Restrict dashboard access
+dashboard_allowed_cidrs = ["YOUR_IP/32"]
+
+# Instance types (defaults are fine for starting)
+# bot_instance_type   = "t4g.small"   # ~$12/month
+# proxy_instance_type = "t4g.nano"    # ~$3/month

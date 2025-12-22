@@ -189,12 +189,6 @@ These are correlated - if Trump wins, GOP Senate is more likely. When correlatio
 - Copy trading
 - High-frequency market making
 
-### Cross-Platform Matching (In Progress)
-
-- Cross-platform market matching between Polymarket and Kalshi
-- LLM-powered matching for semantic similarity
-- Dashboard view for matched markets with price spreads
-
 ---
 
 ## API Integration
@@ -549,17 +543,14 @@ karb/
 │   ├── config.py               # Configuration loading
 │   ├── api/
 │   │   ├── gamma.py            # Gamma API client
-│   │   ├── kalshi.py           # Kalshi API client
+│   │   ├── websocket.py        # WebSocket client
 │   │   └── models.py           # API response models
 │   ├── scanner/
 │   │   └── realtime_scanner.py # WebSocket price monitoring
 │   ├── analyzer/
 │   │   └── arbitrage.py        # Opportunity detection
 │   ├── executor/
-│   │   └── executor.py         # Order execution + monitoring
-│   ├── matcher/
-│   │   ├── event_matcher.py    # Fuzzy market matching
-│   │   └── llm_matcher.py      # LLM-powered matching
+│   │   └── executor.py         # Order execution + monitoring (with SOCKS5 proxy)
 │   ├── dashboard/
 │   │   ├── app.py              # FastAPI dashboard
 │   │   └── templates/
@@ -572,6 +563,14 @@ karb/
 ├── scripts/
 │   ├── approve_usdc.py         # Contract approval script
 │   └── check_wallet.py         # Wallet balance checker
+├── infra/
+│   ├── opentofu/               # Infrastructure provisioning
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── ansible/                # Server configuration
+│       ├── playbooks/
+│       └── roles/
 ├── tests/
 ├── .env.example
 ├── pyproject.toml
@@ -661,3 +660,4 @@ signature = Account.sign_message(signable, private_key)
 |---------|------|---------|
 | 0.1 | 2024-XX-XX | Initial PRD |
 | 0.2 | 2024-12-21 | L2 auth, contract approvals, order monitoring, dashboard order visibility |
+| 0.3 | 2024-12-22 | AWS infra (OpenTofu + Ansible), SOCKS5 proxy support, removed Kalshi |

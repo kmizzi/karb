@@ -1,0 +1,9 @@
+---
+# Deploy bot server only
+# Usage: ansible-playbook playbooks/bot.yml
+
+- name: Deploy bot server
+  hosts: bot
+  become: yes
+  roles:
+    - bot

@@ -1,0 +1,35 @@
+---
+# Copy to all.yml and fill in your values
+# NEVER commit all.yml to git (it contains secrets)
+
+# Git repository
+karb_repo: "https://github.com/kmizzi/karb.git"
+karb_branch: "master"
+
+# Proxy configuration (filled in after tofu apply)
+proxy_host: "REPLACE_WITH_PROXY_IP"
+proxy_port: 1080
+proxy_user: "karb"
+proxy_pass: "GENERATE_SECURE_PASSWORD"
+
+# Wallet (KEEP SECRET!)
+private_key: "0x..."
+wallet_address: "0x..."
+
+# Polymarket L2 API (KEEP SECRET!)
+poly_api_key: "..."
+poly_api_secret: "..."
+poly_api_passphrase: "..."
+
+# Trading parameters
+min_profit_threshold: "0.005"
+max_position_size: "100"
+max_days_until_resolution: "7"
+dry_run: "true"  # Set to "false" for live trading
+
+# Dashboard
+dashboard_username: "admin"
+dashboard_password: "GENERATE_SECURE_PASSWORD"
+
+# Optional: Slack notifications
+# slack_webhook_url: "https://hooks.slack.com/services/..."

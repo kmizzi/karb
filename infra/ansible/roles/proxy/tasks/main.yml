@@ -1,0 +1,48 @@
+---
+# Proxy server setup - SOCKS5 proxy using dante-server
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install dante-server (SOCKS5 proxy)
+  apt:
+    name:
+      - dante-server
+    state: present
+
+- name: Create dante configuration
+  template:
+    src: danted.conf.j2
+    dest: /etc/danted.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart danted
+
+- name: Create proxy user for authentication
+  user:
+    name: "{{ proxy_user }}"
+    password: "{{ proxy_pass | password_hash('sha512') }}"
+    shell: /usr/sbin/nologin
+    create_home: no
+    system: yes
+
+- name: Enable and start danted service
+  systemd:
+    name: danted
+    enabled: yes
+    state: started
+
+- name: Open firewall for SOCKS5 (if ufw is active)
+  ufw:
+    rule: allow
+    port: "{{ proxy_port }}"
+    proto: tcp
+  ignore_errors: yes
+
+- name: Test proxy is listening
+  wait_for:
+    port: "{{ proxy_port }}"
+    timeout: 30

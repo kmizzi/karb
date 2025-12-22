@@ -1,0 +1,113 @@
+---
+# Bot server setup - Karb arbitrage bot
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install system dependencies
+  apt:
+    name:
+      - python3
+      - python3-pip
+      - python3-venv
+      - git
+      - build-essential
+      - libffi-dev
+      - libssl-dev
+    state: present
+
+- name: Create karb user
+  user:
+    name: karb
+    shell: /bin/bash
+    home: /home/karb
+    create_home: yes
+    system: no
+
+- name: Create app directory
+  file:
+    path: /opt/karb
+    state: directory
+    owner: karb
+    group: karb
+    mode: '0755'
+
+- name: Create data directory
+  file:
+    path: /home/karb/.karb
+    state: directory
+    owner: karb
+    group: karb
+    mode: '0755'
+
+- name: Clone/update karb repository
+  git:
+    repo: "{{ karb_repo }}"
+    dest: /opt/karb
+    version: "{{ karb_branch }}"
+    force: yes
+  become_user: karb
+  notify: Restart karb
+
+- name: Create Python virtual environment
+  command: python3 -m venv /opt/karb/venv
+  args:
+    creates: /opt/karb/venv
+  become_user: karb
+
+- name: Install karb package
+  pip:
+    name: /opt/karb
+    editable: yes
+    virtualenv: /opt/karb/venv
+  become_user: karb
+  notify: Restart karb
+
+- name: Create .env file from template
+  template:
+    src: env.j2
+    dest: /opt/karb/.env
+    owner: karb
+    group: karb
+    mode: '0600'
+  notify: Restart karb
+
+- name: Create systemd service for karb bot
+  template:
+    src: karb-bot.service.j2
+    dest: /etc/systemd/system/karb-bot.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart karb
+
+- name: Create systemd service for karb dashboard
+  template:
+    src: karb-dashboard.service.j2
+    dest: /etc/systemd/system/karb-dashboard.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart karb-dashboard
+
+- name: Enable and start karb services
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: started
+  loop:
+    - karb-bot
+    - karb-dashboard
+
+- name: Open firewall for dashboard (if ufw is active)
+  ufw:
+    rule: allow
+    port: "8080"
+    proto: tcp
+  ignore_errors: yes

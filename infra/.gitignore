@@ -1,0 +1,16 @@
+# Terraform/OpenTofu
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.auto.tfvars
+
+# Ansible secrets
+group_vars/all.yml
+inventory/hosts.yml
+
+# General
+*.pem
+*.key
+.env

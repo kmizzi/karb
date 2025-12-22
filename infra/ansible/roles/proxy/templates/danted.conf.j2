@@ -1,0 +1,36 @@
+# Dante SOCKS5 proxy configuration for Karb
+# Optimized for low latency
+
+# Logging
+logoutput: syslog
+
+# Server address - listen on all interfaces
+internal: 0.0.0.0 port = {{ proxy_port }}
+
+# External interface - use the default route
+external: eth0
+
+# Authentication method
+socksmethod: username
+
+# User to run as after binding
+user.privileged: root
+user.unprivileged: nobody
+
+# Client rules - who can connect
+client pass {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: error
+}
+
+# SOCKS rules - what clients can do after authenticating
+socks pass {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    command: connect
+    log: error
+    socksmethod: username
+}
+
+# Performance tuning
+timeout.io: 30
+timeout.negotiate: 10

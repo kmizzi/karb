@@ -1,0 +1,15 @@
+---
+# Main playbook - deploy entire infrastructure
+# Usage: ansible-playbook playbooks/site.yml
+
+- name: Deploy proxy server
+  hosts: proxy
+  become: yes
+  roles:
+    - proxy
+
+- name: Deploy bot server
+  hosts: bot
+  become: yes
+  roles:
+    - bot

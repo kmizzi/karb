@@ -1,0 +1,27 @@
+[Unit]
+Description=Karb Arbitrage Bot
+After=network.target
+
+[Service]
+Type=simple
+User=karb
+Group=karb
+WorkingDirectory=/opt/karb
+EnvironmentFile=/opt/karb/.env
+ExecStart=/opt/karb/venv/bin/karb run --live --realtime
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=karb-bot
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/karb/.karb
+
+[Install]
+WantedBy=multi-user.target
