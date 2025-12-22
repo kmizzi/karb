@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from karb.api.models import ArbitrageOpportunity
 from karb.config import get_settings
+from karb.executor.async_clob import AsyncClobClient, create_async_clob_client
 
 # Order monitoring settings
 ORDER_FILL_TIMEOUT_SECONDS = 10  # Max time to wait for order fills
@@ -160,6 +161,7 @@ class OrderExecutor:
 
         self.stats = ExecutorStats()
         self._clob_client: Optional[ClobClient] = None
+        self._async_client: Optional[AsyncClobClient] = None
         self._execution_history: list[ExecutionResult] = []
         self._trade_log = TradeLog()
         self._active_orders: dict[str, dict] = {}  # Track active orders for dashboard
@@ -186,9 +188,17 @@ class OrderExecutor:
                 log.error("Failed to initialize CLOB client", error=str(e))
                 self._clob_client = None
 
+    async def _ensure_async_client(self) -> Optional[AsyncClobClient]:
+        """Lazily initialize the async CLOB client."""
+        if self._async_client is None:
+            self._async_client = await create_async_clob_client()
+        return self._async_client
+
     async def close(self) -> None:
         """Close resources."""
-        pass  # ClobClient doesn't need explicit cleanup
+        if self._async_client:
+            await self._async_client.close()
+            self._async_client = None
 
     def _save_orders_state(self) -> None:
         """Save current orders state to file for dashboard."""
@@ -268,9 +278,41 @@ class OrderExecutor:
 
             self._save_orders_state()
 
+    async def _submit_order_async(self, token_id: str, side: str, price: float, size: float, neg_risk: bool = False) -> dict[str, Any]:
+        """
+        Submit an order using the async CLOB client (low-latency).
+
+        Args:
+            token_id: The token ID to trade
+            side: "BUY" or "SELL"
+            price: Price per token
+            size: Number of tokens
+            neg_risk: Whether this is a neg_risk market
+
+        Returns:
+            API response
+        """
+        async_client = await self._ensure_async_client()
+        if not async_client:
+            raise RuntimeError("Async CLOB client not initialized - check API credentials")
+
+        try:
+            response = await async_client.submit_order(
+                token_id=token_id,
+                side=side,
+                price=price,
+                size=size,
+                neg_risk=neg_risk,
+            )
+            log.info("Order submitted (async)", token_id=token_id[:10], side=side, response=response)
+            return response
+        except Exception as e:
+            log.error("Async order submission error", error=str(e))
+            raise
+
     def _submit_order_sync(self, token_id: str, side: str, price: float, size: float) -> dict[str, Any]:
         """
-        Submit an order using the official CLOB client.
+        Submit an order using the official CLOB client (fallback).
 
         Args:
             token_id: The token ID to trade
@@ -369,7 +411,6 @@ class OrderExecutor:
         Returns:
             Tuple of (yes_order_status, no_order_status)
         """
-        loop = asyncio.get_event_loop()
         start_time = time.time()
 
         yes_status: dict[str, Any] = {}
@@ -377,20 +418,46 @@ class OrderExecutor:
         yes_filled = False
         no_filled = False
 
-        while time.time() - start_time < timeout:
-            # Check order statuses
-            try:
-                if yes_order_id and not yes_filled:
-                    yes_status = await loop.run_in_executor(
-                        None, self._get_order_sync, yes_order_id
-                    )
-                    yes_filled = yes_status.get("status", "").lower() in ("filled", "matched")
+        # Use async client if available for faster status checks
+        async_client = self._async_client
 
-                if no_order_id and not no_filled:
-                    no_status = await loop.run_in_executor(
-                        None, self._get_order_sync, no_order_id
-                    )
-                    no_filled = no_status.get("status", "").lower() in ("filled", "matched")
+        while time.time() - start_time < timeout:
+            # Check order statuses - use async client if available
+            try:
+                if async_client:
+                    # Native async - check both orders in parallel
+                    tasks = []
+                    if yes_order_id and not yes_filled:
+                        tasks.append(async_client.get_order(yes_order_id))
+                    if no_order_id and not no_filled:
+                        tasks.append(async_client.get_order(no_order_id))
+
+                    if tasks:
+                        results = await asyncio.gather(*tasks, return_exceptions=True)
+                        idx = 0
+                        if yes_order_id and not yes_filled:
+                            if not isinstance(results[idx], Exception):
+                                yes_status = results[idx]
+                                yes_filled = yes_status.get("status", "").lower() in ("filled", "matched")
+                            idx += 1
+                        if no_order_id and not no_filled and idx < len(results):
+                            if not isinstance(results[idx], Exception):
+                                no_status = results[idx]
+                                no_filled = no_status.get("status", "").lower() in ("filled", "matched")
+                else:
+                    # Fallback to sync with executor
+                    loop = asyncio.get_event_loop()
+                    if yes_order_id and not yes_filled:
+                        yes_status = await loop.run_in_executor(
+                            None, self._get_order_sync, yes_order_id
+                        )
+                        yes_filled = yes_status.get("status", "").lower() in ("filled", "matched")
+
+                    if no_order_id and not no_filled:
+                        no_status = await loop.run_in_executor(
+                            None, self._get_order_sync, no_order_id
+                        )
+                        no_filled = no_status.get("status", "").lower() in ("filled", "matched")
 
                 # Both filled - success!
                 if yes_filled and no_filled:
@@ -419,7 +486,11 @@ class OrderExecutor:
 
         for label, order_id in orders_to_cancel:
             try:
-                await loop.run_in_executor(None, self._cancel_order_sync, order_id)
+                if async_client:
+                    await async_client.cancel_order(order_id)
+                else:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, self._cancel_order_sync, order_id)
                 log.info(f"Cancelled unfilled {label} order", order_id=order_id[:20])
             except Exception as e:
                 log.error(f"Failed to cancel {label} order", order_id=order_id[:20], error=str(e))
@@ -436,6 +507,16 @@ class OrderExecutor:
         Returns:
             True if cancelled successfully
         """
+        # Try async client first
+        if self._async_client:
+            try:
+                result = await self._async_client.cancel_order(order_id)
+                return order_id in result.get("canceled", [])
+            except Exception as e:
+                log.error("Failed to cancel order (async)", order_id=order_id[:20], error=str(e))
+                return False
+
+        # Fallback to sync client
         if not self._clob_client:
             log.error("CLOB client not initialized")
             return False
@@ -455,6 +536,15 @@ class OrderExecutor:
         Returns:
             Cancellation result with canceled/not_canceled lists
         """
+        # Try async client first
+        if self._async_client:
+            try:
+                return await self._async_client.cancel_all()
+            except Exception as e:
+                log.error("Failed to cancel all orders (async)", error=str(e))
+                return {"canceled": [], "not_canceled": {}, "error": str(e)}
+
+        # Fallback to sync client
         if not self._clob_client:
             log.error("CLOB client not initialized")
             return {"canceled": [], "not_canceled": {}}
@@ -604,9 +694,10 @@ class OrderExecutor:
         if self.dry_run:
             return await self.execute_dry_run(opportunity)
 
-        # Check CLOB client is available
-        if not self._clob_client:
-            log.error("CLOB client not initialized, cannot execute orders")
+        # Ensure async client is available (preferred) or fall back to sync client
+        async_client = await self._ensure_async_client()
+        if not async_client and not self._clob_client:
+            log.error("No CLOB client initialized, cannot execute orders")
             return ExecutionResult(
                 opportunity=opportunity,
                 yes_order=OrderResult(
@@ -636,30 +727,53 @@ class OrderExecutor:
             size=float(opportunity.max_trade_size),
         )
 
-        # Submit orders using official CLOB client
-        # Run in executor since py-clob-client is synchronous
-        loop = asyncio.get_event_loop()
+        # Determine if this is a neg_risk market (from market metadata if available)
+        neg_risk = getattr(opportunity.market, 'neg_risk', False)
 
         try:
-            yes_response, no_response = await asyncio.gather(
-                loop.run_in_executor(
-                    None,
-                    self._submit_order_sync,
-                    opportunity.market.yes_token.token_id,
-                    "BUY",
-                    float(opportunity.yes_ask),
-                    float(opportunity.max_trade_size),
-                ),
-                loop.run_in_executor(
-                    None,
-                    self._submit_order_sync,
-                    opportunity.market.no_token.token_id,
-                    "BUY",
-                    float(opportunity.no_ask),
-                    float(opportunity.max_trade_size),
-                ),
-                return_exceptions=True,
-            )
+            if async_client:
+                # Use native async client for low-latency parallel execution
+                # Sign both orders in parallel (CPU-bound, uses thread pool internally)
+                # Then submit both orders in parallel (network-bound, native async)
+                yes_response, no_response = await asyncio.gather(
+                    self._submit_order_async(
+                        opportunity.market.yes_token.token_id,
+                        "BUY",
+                        float(opportunity.yes_ask),
+                        float(opportunity.max_trade_size),
+                        neg_risk,
+                    ),
+                    self._submit_order_async(
+                        opportunity.market.no_token.token_id,
+                        "BUY",
+                        float(opportunity.no_ask),
+                        float(opportunity.max_trade_size),
+                        neg_risk,
+                    ),
+                    return_exceptions=True,
+                )
+            else:
+                # Fallback to sync client wrapped in executor
+                loop = asyncio.get_event_loop()
+                yes_response, no_response = await asyncio.gather(
+                    loop.run_in_executor(
+                        None,
+                        self._submit_order_sync,
+                        opportunity.market.yes_token.token_id,
+                        "BUY",
+                        float(opportunity.yes_ask),
+                        float(opportunity.max_trade_size),
+                    ),
+                    loop.run_in_executor(
+                        None,
+                        self._submit_order_sync,
+                        opportunity.market.no_token.token_id,
+                        "BUY",
+                        float(opportunity.no_ask),
+                        float(opportunity.max_trade_size),
+                    ),
+                    return_exceptions=True,
+                )
         except Exception as e:
             log.error("Order submission failed", error=str(e))
             self.stats.failed += 1
