@@ -1,6 +1,7 @@
 """Order execution for arbitrage trades."""
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -9,6 +10,10 @@ from typing import Any, Optional
 
 from karb.api.models import ArbitrageOpportunity
 from karb.config import get_settings
+
+# Order monitoring settings
+ORDER_FILL_TIMEOUT_SECONDS = 10  # Max time to wait for order fills
+ORDER_CHECK_INTERVAL_SECONDS = 0.5  # How often to check order status
 from karb.executor.signer import OrderSide, OrderSigner
 from karb.notifications.slack import get_notifier
 from karb.tracking.trades import Trade, TradeLog
@@ -81,6 +86,7 @@ class ExecutorStats:
     successful: int = 0
     partial: int = 0
     failed: int = 0
+    cancelled: int = 0
     total_volume: Decimal = Decimal("0")
     total_profit: Decimal = Decimal("0")
 
@@ -168,6 +174,174 @@ class OrderExecutor:
         except Exception as e:
             log.error("Order submission error", error=str(e))
             raise
+
+    def _cancel_order_sync(self, order_id: str) -> dict[str, Any]:
+        """
+        Cancel an order.
+
+        Args:
+            order_id: The order ID to cancel
+
+        Returns:
+            API response with canceled/not_canceled lists
+        """
+        if not self._clob_client:
+            raise RuntimeError("CLOB client not initialized")
+
+        try:
+            response = self._clob_client.cancel(order_id)
+            log.info("Order cancelled", order_id=order_id[:20], response=response)
+            return response
+        except Exception as e:
+            log.error("Order cancellation error", order_id=order_id[:20], error=str(e))
+            raise
+
+    def _cancel_all_orders_sync(self) -> dict[str, Any]:
+        """Cancel all open orders."""
+        if not self._clob_client:
+            raise RuntimeError("CLOB client not initialized")
+
+        try:
+            response = self._clob_client.cancel_all()
+            log.info("All orders cancelled", response=response)
+            return response
+        except Exception as e:
+            log.error("Cancel all orders error", error=str(e))
+            raise
+
+    def _get_order_sync(self, order_id: str) -> dict[str, Any]:
+        """
+        Get order status.
+
+        Args:
+            order_id: The order ID to check
+
+        Returns:
+            Order details including status
+        """
+        if not self._clob_client:
+            raise RuntimeError("CLOB client not initialized")
+
+        try:
+            response = self._clob_client.get_order(order_id)
+            return response
+        except Exception as e:
+            log.error("Get order error", order_id=order_id[:20], error=str(e))
+            raise
+
+    async def _wait_for_fills(
+        self,
+        yes_order_id: Optional[str],
+        no_order_id: Optional[str],
+        timeout: float = ORDER_FILL_TIMEOUT_SECONDS,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """
+        Wait for orders to fill, with timeout and cancellation.
+
+        Args:
+            yes_order_id: YES order ID
+            no_order_id: NO order ID
+            timeout: Max seconds to wait
+
+        Returns:
+            Tuple of (yes_order_status, no_order_status)
+        """
+        loop = asyncio.get_event_loop()
+        start_time = time.time()
+
+        yes_status: dict[str, Any] = {}
+        no_status: dict[str, Any] = {}
+        yes_filled = False
+        no_filled = False
+
+        while time.time() - start_time < timeout:
+            # Check order statuses
+            try:
+                if yes_order_id and not yes_filled:
+                    yes_status = await loop.run_in_executor(
+                        None, self._get_order_sync, yes_order_id
+                    )
+                    yes_filled = yes_status.get("status", "").lower() in ("filled", "matched")
+
+                if no_order_id and not no_filled:
+                    no_status = await loop.run_in_executor(
+                        None, self._get_order_sync, no_order_id
+                    )
+                    no_filled = no_status.get("status", "").lower() in ("filled", "matched")
+
+                # Both filled - success!
+                if yes_filled and no_filled:
+                    log.info("Both orders filled successfully")
+                    return yes_status, no_status
+
+            except Exception as e:
+                log.warning("Error checking order status", error=str(e))
+
+            await asyncio.sleep(ORDER_CHECK_INTERVAL_SECONDS)
+
+        # Timeout reached - cancel unfilled orders
+        log.warning(
+            "Order fill timeout reached",
+            yes_filled=yes_filled,
+            no_filled=no_filled,
+            timeout=timeout,
+        )
+
+        # Cancel any unfilled orders
+        orders_to_cancel = []
+        if yes_order_id and not yes_filled:
+            orders_to_cancel.append(("YES", yes_order_id))
+        if no_order_id and not no_filled:
+            orders_to_cancel.append(("NO", no_order_id))
+
+        for label, order_id in orders_to_cancel:
+            try:
+                await loop.run_in_executor(None, self._cancel_order_sync, order_id)
+                log.info(f"Cancelled unfilled {label} order", order_id=order_id[:20])
+            except Exception as e:
+                log.error(f"Failed to cancel {label} order", order_id=order_id[:20], error=str(e))
+
+        return yes_status, no_status
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """
+        Cancel a specific order.
+
+        Args:
+            order_id: The order ID to cancel
+
+        Returns:
+            True if cancelled successfully
+        """
+        if not self._clob_client:
+            log.error("CLOB client not initialized")
+            return False
+
+        try:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self._cancel_order_sync, order_id)
+            return order_id in result.get("canceled", [])
+        except Exception as e:
+            log.error("Failed to cancel order", order_id=order_id[:20], error=str(e))
+            return False
+
+    async def cancel_all_orders(self) -> dict[str, Any]:
+        """
+        Cancel all open orders.
+
+        Returns:
+            Cancellation result with canceled/not_canceled lists
+        """
+        if not self._clob_client:
+            log.error("CLOB client not initialized")
+            return {"canceled": [], "not_canceled": {}}
+
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self._cancel_all_orders_sync)
+        except Exception as e:
+            log.error("Failed to cancel all orders", error=str(e))
+            return {"canceled": [], "not_canceled": {}, "error": str(e)}
 
     async def execute_dry_run(
         self, opportunity: ArbitrageOpportunity
@@ -387,7 +561,7 @@ class OrderExecutor:
                 status=ExecutionStatus.FAILED,
             )
 
-        # Parse responses
+        # Parse initial responses
         yes_result = self._parse_order_response(
             yes_response,
             opportunity.market.yes_token.token_id,
@@ -404,6 +578,42 @@ class OrderExecutor:
             opportunity.max_trade_size,
         )
 
+        # If orders were submitted but not immediately filled, wait and monitor
+        yes_needs_monitoring = yes_result.status == ExecutionStatus.SUBMITTED and yes_result.order_id
+        no_needs_monitoring = no_result.status == ExecutionStatus.SUBMITTED and no_result.order_id
+
+        if yes_needs_monitoring or no_needs_monitoring:
+            log.info(
+                "Orders submitted, waiting for fills",
+                yes_order_id=yes_result.order_id[:20] if yes_result.order_id else None,
+                no_order_id=no_result.order_id[:20] if no_result.order_id else None,
+            )
+
+            # Wait for orders to fill (with timeout and auto-cancellation)
+            yes_final_status, no_final_status = await self._wait_for_fills(
+                yes_result.order_id if yes_needs_monitoring else None,
+                no_result.order_id if no_needs_monitoring else None,
+            )
+
+            # Update results based on final status
+            if yes_needs_monitoring and yes_final_status:
+                status_str = yes_final_status.get("status", "").lower()
+                if status_str in ("filled", "matched"):
+                    yes_result.status = ExecutionStatus.FILLED
+                    yes_result.filled_size = opportunity.max_trade_size
+                elif status_str in ("cancelled", "canceled"):
+                    yes_result.status = ExecutionStatus.CANCELLED
+                    yes_result.filled_size = Decimal("0")
+
+            if no_needs_monitoring and no_final_status:
+                status_str = no_final_status.get("status", "").lower()
+                if status_str in ("filled", "matched"):
+                    no_result.status = ExecutionStatus.FILLED
+                    no_result.filled_size = opportunity.max_trade_size
+                elif status_str in ("cancelled", "canceled"):
+                    no_result.status = ExecutionStatus.CANCELLED
+                    no_result.filled_size = Decimal("0")
+
         # Determine overall status
         if yes_result.status == ExecutionStatus.FILLED and no_result.status == ExecutionStatus.FILLED:
             status = ExecutionStatus.FILLED
@@ -415,13 +625,34 @@ class OrderExecutor:
             status = ExecutionStatus.FAILED
             self.stats.failed += 1
             total_cost = Decimal("0")
+        elif yes_result.status == ExecutionStatus.CANCELLED and no_result.status == ExecutionStatus.CANCELLED:
+            # Both cancelled (timeout) - no position taken
+            status = ExecutionStatus.CANCELLED
+            self.stats.cancelled += 1
+            total_cost = Decimal("0")
+            log.warning("Both orders cancelled due to timeout - no position taken")
         else:
+            # Partial fill or mixed status - this is risky!
             status = ExecutionStatus.PARTIAL
             self.stats.partial += 1
             # Calculate partial cost
             yes_cost = yes_result.filled_size * opportunity.yes_ask
             no_cost = no_result.filled_size * opportunity.no_ask
             total_cost = yes_cost + no_cost
+
+            # Log warning about unhedged position
+            if yes_result.status == ExecutionStatus.FILLED and no_result.status != ExecutionStatus.FILLED:
+                log.error(
+                    "UNHEDGED POSITION: YES filled but NO did not!",
+                    yes_size=float(yes_result.filled_size),
+                    no_status=no_result.status.value,
+                )
+            elif no_result.status == ExecutionStatus.FILLED and yes_result.status != ExecutionStatus.FILLED:
+                log.error(
+                    "UNHEDGED POSITION: NO filled but YES did not!",
+                    no_size=float(no_result.filled_size),
+                    yes_status=yes_result.status.value,
+                )
 
         result = ExecutionResult(
             opportunity=opportunity,
@@ -533,6 +764,7 @@ class OrderExecutor:
             "successful": self.stats.successful,
             "partial": self.stats.partial,
             "failed": self.stats.failed,
+            "cancelled": self.stats.cancelled,
             "total_volume": float(self.stats.total_volume),
             "total_profit": float(self.stats.total_profit),
             "success_rate": (
