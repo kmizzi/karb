@@ -165,28 +165,35 @@ These are correlated - if Trump wins, GOP Senate is more likely. When correlatio
 
 ## MVP Scope
 
-### MVP Features (Phase 1)
+### MVP Features (Phase 1) ✅ Implemented
 
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| Market Scanner | P0 | Poll all active markets for prices |
-| Arbitrage Detection | P0 | Identify YES+NO < threshold opportunities |
-| Order Execution | P0 | Place and monitor orders |
-| Position Tracking | P0 | Track open positions per market |
-| Basic Logging | P0 | Console + file logging |
-| Configuration | P1 | Adjustable thresholds, polling rate |
-| Dry Run Mode | P1 | Simulate trades without execution |
-| Trade History | P1 | SQLite storage of all trades |
-| Telegram Alerts | P2 | Notifications for trades/errors |
-| Web Dashboard | P2 | Real-time monitoring UI |
+| Feature | Priority | Status | Description |
+|---------|----------|--------|-------------|
+| Market Scanner | P0 | ✅ | Real-time WebSocket price monitoring |
+| Arbitrage Detection | P0 | ✅ | Identify YES+NO < threshold opportunities |
+| Order Execution | P0 | ✅ | Place orders with 10s timeout + auto-cancel |
+| Position Tracking | P0 | ✅ | Track open positions per market |
+| Basic Logging | P0 | ✅ | Structured logging with structlog |
+| Configuration | P1 | ✅ | Environment variable configuration |
+| Dry Run Mode | P1 | ✅ | Simulate trades without execution |
+| Trade History | P1 | ✅ | SQLite storage of all trades |
+| Slack Alerts | P2 | ✅ | Notifications for trades/errors |
+| Web Dashboard | P2 | ✅ | Real-time monitoring with order visibility |
+| Order Monitoring | P1 | ✅ | Track order status, fills, cancellations |
+| Resolution Filtering | P1 | ✅ | Skip markets resolving beyond N days |
 
 ### MVP Non-Goals
 
-- Multi-platform arbitrage
 - Statistical arbitrage
 - Machine learning models
 - Copy trading
 - High-frequency market making
+
+### Cross-Platform Matching (In Progress)
+
+- Cross-platform market matching between Polymarket and Kalshi
+- LLM-powered matching for semantic similarity
+- Dashboard view for matched markets with price spreads
 
 ---
 
@@ -288,14 +295,24 @@ GET /activity                   # Platform activity
 
 ### Authentication
 
-CLOB API uses EIP-712 signatures for order authentication:
+CLOB API uses **L2 Authentication** via the `py-clob-client` library:
 
-1. Create order object
-2. Hash using EIP-712 typed data
-3. Sign with private key
-4. Include signature in API request
+1. Generate API credentials from your wallet:
+   ```python
+   from py_clob_client.client import ClobClient
+   client = ClobClient('https://clob.polymarket.com', key=private_key, chain_id=137)
+   creds = client.create_or_derive_api_creds()
+   # Returns: api_key, api_secret, api_passphrase
+   ```
 
-**No API keys required** - authentication is wallet-based.
+2. Use credentials for all API requests:
+   - `POLY_API_KEY` - API key
+   - `POLY_API_SECRET` - API secret
+   - `POLY_API_PASSPHRASE` - API passphrase
+
+3. ClobClient handles order signing (EIP-712) automatically
+
+**Note:** API credentials are derived from your wallet and can be regenerated anytime.
 
 ---
 
@@ -456,15 +473,18 @@ CLOB API uses EIP-712 signatures for order authentication:
 aiohttp          # Async HTTP client
 web3             # Ethereum/Polygon interaction
 eth-account      # Wallet and signing
+py-clob-client   # Polymarket L2 API client
 python-dotenv    # Configuration
 structlog        # Structured logging
 sqlite3          # Trade storage (built-in)
+fastapi          # Dashboard web framework
+uvicorn          # ASGI server
 ```
 
 ### Infrastructure
-- **Runtime:** VPS (DigitalOcean, AWS, etc.)
-- **Monitoring:** Custom + Telegram alerts
-- **Deployment:** Docker container
+- **Runtime:** EU-based VPS (Polymarket blocks US IPs)
+- **Monitoring:** Web dashboard + Slack alerts
+- **Deployment:** Docker container or systemd service
 
 ---
 
@@ -476,23 +496,45 @@ sqlite3          # Trade storage (built-in)
 PRIVATE_KEY=0x...
 WALLET_ADDRESS=0x...
 
+# Polymarket L2 API Credentials (generate with py-clob-client)
+POLY_API_KEY=...
+POLY_API_SECRET=...
+POLY_API_PASSPHRASE=...
+
 # Network
 POLYGON_RPC_URL=https://polygon-rpc.com
 CHAIN_ID=137
 
 # Trading
 MIN_PROFIT_THRESHOLD=0.005      # 0.5% minimum profit
-MAX_POSITION_SIZE=1000          # Max $1000 per market
-POLL_INTERVAL_SECONDS=2
-MIN_LIQUIDITY_USD=5000          # Min liquidity to trade
+MAX_POSITION_SIZE=100           # Max $100 per trade
+MAX_DAYS_UNTIL_RESOLUTION=7     # Skip markets resolving later
+DRY_RUN=true                    # Set to false for live trading
 
-# API
-CLOB_BASE_URL=https://clob.polymarket.com
-GAMMA_BASE_URL=https://gamma-api.polymarket.com
+# Dashboard
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=...
 
 # Alerts
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHAT_ID=...
+SLACK_WEBHOOK_URL=...
+```
+
+### Contract Approvals
+
+Before trading, approve Polymarket contracts to spend USDC.e:
+
+```bash
+python scripts/approve_usdc.py
+```
+
+Required approvals:
+- **CTF Exchange** (`0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E`) - ERC20 + ERC1155
+- **Neg Risk Exchange** (`0xC5d563A36AE78145C45a50134d48A1215220f80a`) - ERC20 + ERC1155
+- **Neg Risk Adapter** (`0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296`) - ERC20
+
+After approvals, sync with Polymarket:
+```python
+client.update_balance_allowance()
 ```
 
 ---
@@ -500,36 +542,37 @@ TELEGRAM_CHAT_ID=...
 ## File Structure
 
 ```
-polymarket-arb/
-├── src/
+karb/
+├── src/karb/
 │   ├── __init__.py
-│   ├── main.py                 # Entry point
+│   ├── bot.py                  # Main bot entry point
 │   ├── config.py               # Configuration loading
 │   ├── api/
-│   │   ├── __init__.py
 │   │   ├── gamma.py            # Gamma API client
-│   │   ├── clob.py             # CLOB API client
+│   │   ├── kalshi.py           # Kalshi API client
 │   │   └── models.py           # API response models
 │   ├── scanner/
-│   │   ├── __init__.py
-│   │   └── market_scanner.py   # Market polling
+│   │   └── realtime_scanner.py # WebSocket price monitoring
 │   ├── analyzer/
-│   │   ├── __init__.py
 │   │   └── arbitrage.py        # Opportunity detection
 │   ├── executor/
-│   │   ├── __init__.py
-│   │   ├── order_builder.py    # Order construction
-│   │   ├── signer.py           # EIP-712 signing
-│   │   └── executor.py         # Order execution
-│   ├── data/
-│   │   ├── __init__.py
-│   │   ├── database.py         # SQLite operations
-│   │   └── models.py           # Data models
+│   │   └── executor.py         # Order execution + monitoring
+│   ├── matcher/
+│   │   ├── event_matcher.py    # Fuzzy market matching
+│   │   └── llm_matcher.py      # LLM-powered matching
+│   ├── dashboard/
+│   │   ├── app.py              # FastAPI dashboard
+│   │   └── templates/
+│   │       └── dashboard.html  # Dashboard UI
+│   ├── tracking/
+│   │   ├── portfolio.py        # Balance tracking
+│   │   └── trades.py           # Trade history
 │   └── utils/
-│       ├── __init__.py
 │       └── logging.py          # Logging setup
+├── scripts/
+│   ├── approve_usdc.py         # Contract approval script
+│   └── check_wallet.py         # Wallet balance checker
 ├── tests/
-│   └── ...
 ├── .env.example
 ├── pyproject.toml
 ├── README.md
@@ -617,3 +660,4 @@ signature = Account.sign_message(signable, private_key)
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1 | 2024-XX-XX | Initial PRD |
+| 0.2 | 2024-12-21 | L2 auth, contract approvals, order monitoring, dashboard order visibility |
