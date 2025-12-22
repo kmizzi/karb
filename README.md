@@ -19,11 +19,11 @@ Live trading enabled. Dashboard available at configured domain.
 
 ## Features
 
-- Real-time WebSocket price monitoring
+- Real-time WebSocket price monitoring (6 parallel connections, up to 1500 markets)
 - Automatic arbitrage detection and execution
 - Order monitoring with 10-second timeout and auto-cancellation
-- Resolution date filtering (configurable, default 7 days max)
-- Web dashboard with live order visibility
+- Market filtering by liquidity ($10k+ default) and resolution date (7 days default)
+- Web dashboard with live order visibility (HTTPS with auto SSL)
 - Slack notifications for trades
 - SOCKS5 proxy support for geo-restricted order placement
 
@@ -76,10 +76,12 @@ POLY_API_PASSPHRASE=...
 # Trading Parameters
 MIN_PROFIT_THRESHOLD=0.005           # 0.5% minimum profit
 MAX_POSITION_SIZE=100                # Max $100 per trade
+MIN_LIQUIDITY_USD=10000              # $10k minimum market liquidity
 MAX_DAYS_UNTIL_RESOLUTION=7          # Skip markets resolving later
+NUM_WS_CONNECTIONS=6                 # WebSocket connections (250 markets each)
 DRY_RUN=true                         # Set to false for live trading
 
-# Dashboard
+# Dashboard (optional - omit for no auth)
 DASHBOARD_USERNAME=admin
 DASHBOARD_PASSWORD=...
 ```

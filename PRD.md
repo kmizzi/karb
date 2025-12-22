@@ -138,10 +138,10 @@ These are correlated - if Trump wins, GOP Senate is more likely. When correlatio
 ### Component Details
 
 #### 1. Scanner Module
-- Polls Polymarket APIs every 1-3 seconds
-- Maintains real-time orderbook snapshots
-- Tracks bid/ask for all active markets
-- Filters markets by volume, liquidity thresholds
+- Real-time WebSocket streaming (6 parallel connections)
+- Each connection handles up to 500 assets (250 markets)
+- Monitors up to 1,500 markets simultaneously
+- Filters by liquidity ($10k+ default) and resolution date (7 days default)
 
 #### 2. Analyzer Module
 - Calculates arbitrage opportunities in real-time
@@ -502,10 +502,12 @@ CHAIN_ID=137
 # Trading
 MIN_PROFIT_THRESHOLD=0.005      # 0.5% minimum profit
 MAX_POSITION_SIZE=100           # Max $100 per trade
+MIN_LIQUIDITY_USD=10000         # $10k minimum market liquidity
 MAX_DAYS_UNTIL_RESOLUTION=7     # Skip markets resolving later
+NUM_WS_CONNECTIONS=6            # WebSocket connections (250 markets each)
 DRY_RUN=true                    # Set to false for live trading
 
-# Dashboard
+# Dashboard (optional - omit password for no auth)
 DASHBOARD_USERNAME=admin
 DASHBOARD_PASSWORD=...
 
@@ -661,3 +663,4 @@ signature = Account.sign_message(signable, private_key)
 | 0.1 | 2024-XX-XX | Initial PRD |
 | 0.2 | 2024-12-21 | L2 auth, contract approvals, order monitoring, dashboard order visibility |
 | 0.3 | 2024-12-22 | AWS infra (OpenTofu + Ansible), SOCKS5 proxy support, removed Kalshi |
+| 0.4 | 2025-12-22 | Multi-connection scanner (6 WS, 1500 markets), HTTPS dashboard with Caddy |
