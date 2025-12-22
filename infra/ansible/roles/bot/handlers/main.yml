@@ -12,3 +12,8 @@
   systemd:
     name: karb-dashboard
     state: restarted
+
+- name: Reload caddy
+  systemd:
+    name: caddy
+    state: reloaded

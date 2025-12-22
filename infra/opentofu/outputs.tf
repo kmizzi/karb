@@ -48,7 +48,7 @@ output "ansible_inventory" {
 
 output "dashboard_url" {
   description = "Dashboard URL"
-  value       = "http://karb.arkets.com"
+  value       = "https://karb.arkets.com"
 }
 
 output "dns_record" {

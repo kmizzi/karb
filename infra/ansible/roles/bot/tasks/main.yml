@@ -132,9 +132,60 @@
     - karb-bot
     - karb-dashboard
 
-- name: Open firewall for dashboard (if ufw is active)
+# Caddy for HTTPS reverse proxy
+- name: Install Caddy prerequisites
+  apt:
+    name:
+      - debian-keyring
+      - debian-archive-keyring
+      - apt-transport-https
+      - curl
+    state: present
+
+- name: Add Caddy GPG key
+  shell: curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  args:
+    creates: /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+
+- name: Add Caddy repository
+  shell: curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+  args:
+    creates: /etc/apt/sources.list.d/caddy-stable.list
+
+- name: Update apt cache for Caddy
+  apt:
+    update_cache: yes
+
+- name: Install Caddy
+  apt:
+    name: caddy
+    state: present
+
+- name: Deploy Caddyfile
+  template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload caddy
+
+- name: Enable and start Caddy
+  systemd:
+    name: caddy
+    enabled: yes
+    state: started
+
+- name: Open firewall for HTTP (Let's Encrypt)
   ufw:
     rule: allow
     port: "80"
+    proto: tcp
+  ignore_errors: yes
+
+- name: Open firewall for HTTPS
+  ufw:
+    rule: allow
+    port: "443"
     proto: tcp
   ignore_errors: yes
