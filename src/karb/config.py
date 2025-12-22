@@ -189,6 +189,10 @@ class Settings(BaseSettings):
         """Check if SOCKS5 proxy is configured."""
         return self.socks5_proxy_host is not None
 
+    def is_kalshi_enabled(self) -> bool:
+        """Check if Kalshi is configured. Deprecated - always returns False."""
+        return False
+
 
 # Global settings instance
 _settings: Optional[Settings] = None

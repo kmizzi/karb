@@ -18,9 +18,9 @@ class BalanceSnapshot:
     """A point-in-time balance snapshot."""
     timestamp: str
     polymarket_usdc: float
-    kalshi_usd: float
     total_usd: float
     positions_value: float = 0.0  # Value of open positions
+    kalshi_usd: float = 0.0  # Deprecated, kept for compatibility
 
 
 class PortfolioTracker:
@@ -34,12 +34,12 @@ class PortfolioTracker:
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
 
     async def get_current_balances(self) -> dict:
-        """Fetch current balances from all platforms."""
+        """Fetch current balances from Polymarket."""
         settings = get_settings()
         balances = {
             "timestamp": datetime.now().isoformat(),
             "polymarket_usdc": 0.0,
-            "kalshi_usd": 0.0,
+            "kalshi_usd": 0.0,  # Deprecated
             "total_usd": 0.0,
         }
 
@@ -65,32 +65,17 @@ class PortfolioTracker:
 
                 balances["polymarket_usdc"] = total_usdc
             except Exception as e:
-                log.debug("Failed to get Polymarket balance", error=str(e))
+                log.error("Failed to get balances", error=str(e))
 
-        # Get Kalshi balance
-        if settings.is_kalshi_enabled():
-            try:
-                from karb.api.kalshi import KalshiClient
-                async with KalshiClient() as client:
-                    balance = await client.get_balance()
-                    balances["kalshi_usd"] = float(balance)
-            except Exception as e:
-                log.debug("Failed to get Kalshi balance", error=str(e))
-
-        balances["total_usd"] = balances["polymarket_usdc"] + balances["kalshi_usd"]
+        balances["total_usd"] = balances["polymarket_usdc"]
         return balances
 
     async def get_positions(self) -> dict:
-        """Get open positions on all platforms."""
-        settings = get_settings()
+        """Get open positions on Polymarket."""
         positions = {
             "polymarket": [],
-            "kalshi": [],
         }
-
         # Polymarket positions would require additional API implementation
-        # Kalshi positions can be fetched from their portfolio API
-
         return positions
 
     def record_snapshot(self, snapshot: BalanceSnapshot) -> None:
