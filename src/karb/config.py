@@ -55,7 +55,7 @@ class Settings(BaseSettings):
         le=60.0,
     )
     min_liquidity_usd: float = Field(
-        default=1000.0,
+        default=10000.0,
         description="Minimum liquidity in USD to consider a market",
         ge=0.0,
     )
@@ -64,6 +64,12 @@ class Settings(BaseSettings):
         description="Maximum days until market resolution (skip markets resolving later)",
         ge=1,
         le=365,
+    )
+    num_ws_connections: int = Field(
+        default=6,
+        description="Number of WebSocket connections for scanner (each handles 250 markets)",
+        ge=1,
+        le=20,
     )
 
     # API Endpoints

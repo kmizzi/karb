@@ -231,6 +231,7 @@ class GammaClient:
         self,
         min_volume: float = 0,
         min_liquidity: float = 0,
+        max_days_until_resolution: Optional[int] = None,
     ) -> list[Market]:
         """
         Fetch all active markets with optional filtering.
@@ -238,13 +239,17 @@ class GammaClient:
         Args:
             min_volume: Minimum volume in USD
             min_liquidity: Minimum liquidity in USD
+            max_days_until_resolution: Maximum days until market resolves (None = no limit)
 
         Returns:
             List of Market objects
         """
+        from datetime import datetime, timezone
+
         markets: list[Market] = []
         offset = 0
         limit = 100
+        now = datetime.now(timezone.utc)
 
         while True:
             raw_markets = await self.get_markets(
@@ -268,6 +273,15 @@ class GammaClient:
                 if market.liquidity < Decimal(str(min_liquidity)):
                     continue
 
+                # Filter by resolution date
+                if max_days_until_resolution is not None and market.end_date:
+                    end_date = market.end_date
+                    if end_date.tzinfo is None:
+                        end_date = end_date.replace(tzinfo=timezone.utc)
+                    days_until = (end_date - now).days
+                    if days_until > max_days_until_resolution:
+                        continue
+
                 markets.append(market)
 
             # Check if we got fewer than limit (last page)
@@ -281,6 +295,7 @@ class GammaClient:
             total=len(markets),
             min_volume=min_volume,
             min_liquidity=min_liquidity,
+            max_days=max_days_until_resolution,
         )
 
         return markets

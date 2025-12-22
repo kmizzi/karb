@@ -27,6 +27,8 @@ ALERTS_FILE = Path.home() / ".karb" / "scanner_alerts.json"
 
 # Maximum assets per WebSocket connection
 MAX_ASSETS_PER_WS = 500
+# Default number of WebSocket connections
+DEFAULT_WS_CONNECTIONS = 6
 
 
 @dataclass
@@ -92,25 +94,43 @@ class RealtimeScanner:
     1. Loads markets from Gamma API
     2. Subscribes to WebSocket for real-time price updates
     3. Triggers callbacks instantly when arbitrage is detected
+
+    Supports multiple WebSocket connections to monitor more markets.
     """
 
     def __init__(
         self,
         on_arbitrage: Optional[ArbitrageCallback] = None,
-        min_liquidity: float = 1000.0,
-        max_markets: int = 250,  # 250 markets * 2 tokens = 500 (WebSocket limit)
+        min_liquidity: Optional[float] = None,
+        max_days_until_resolution: Optional[int] = None,
+        num_connections: Optional[int] = None,
     ) -> None:
         settings = get_settings()
 
         self.gamma = GammaClient()
-        self.ws_client = WebSocketClient(
-            on_book=self._on_book_update,
-            on_price_change=self._on_price_change,
+
+        # Use settings from config, allow override via constructor
+        self.min_liquidity = min_liquidity if min_liquidity is not None else settings.min_liquidity_usd
+        self.max_days_until_resolution = (
+            max_days_until_resolution if max_days_until_resolution is not None
+            else settings.max_days_until_resolution
         )
+        self.num_connections = num_connections if num_connections is not None else settings.num_ws_connections
+
+        # Calculate max markets based on connections
+        # Each connection can handle 500 assets = 250 markets (YES + NO tokens)
+        self.max_markets = (MAX_ASSETS_PER_WS // 2) * self.num_connections
+
+        # Create multiple WebSocket clients
+        self.ws_clients: list[WebSocketClient] = []
+        for i in range(self.num_connections):
+            client = WebSocketClient(
+                on_book=self._on_book_update,
+                on_price_change=self._on_price_change,
+            )
+            self.ws_clients.append(client)
 
         self._on_arbitrage = on_arbitrage
-        self.min_liquidity = min_liquidity or settings.min_liquidity_usd
-        self.max_markets = max_markets
 
         # State
         self._markets: dict[str, Market] = {}  # market_id -> Market
@@ -122,12 +142,21 @@ class RealtimeScanner:
         self._price_updates = 0
         self._arbitrage_alerts = 0
 
+        log.info(
+            "Scanner initialized",
+            num_connections=self.num_connections,
+            max_markets=self.max_markets,
+            min_liquidity=self.min_liquidity,
+            max_days=self.max_days_until_resolution,
+        )
+
     async def load_markets(self) -> list[Market]:
         """Load active markets from Gamma API."""
         log.info("Loading markets from Gamma API...")
 
         markets = await self.gamma.fetch_all_active_markets(
             min_liquidity=self.min_liquidity,
+            max_days_until_resolution=self.max_days_until_resolution,
         )
 
         # Sort by liquidity and take top N
@@ -149,6 +178,7 @@ class RealtimeScanner:
             "Markets loaded",
             count=len(markets),
             min_liquidity=self.min_liquidity,
+            max_days=self.max_days_until_resolution,
         )
 
         return markets
@@ -156,7 +186,8 @@ class RealtimeScanner:
     async def subscribe_to_markets(self) -> None:
         """Subscribe to WebSocket updates for all loaded markets."""
         # Clear old subscriptions for fresh start
-        self.ws_client._subscribed_assets.clear()
+        for client in self.ws_clients:
+            client._subscribed_assets.clear()
 
         # Collect all token IDs (YES and NO for each market)
         token_ids = []
@@ -164,8 +195,17 @@ class RealtimeScanner:
             token_ids.append(market.yes_token.token_id)
             token_ids.append(market.no_token.token_id)
 
-        log.info("Subscribing to tokens", count=len(token_ids))
-        await self.ws_client.subscribe(token_ids)
+        log.info("Subscribing to tokens", count=len(token_ids), connections=len(self.ws_clients))
+
+        # Distribute tokens across connections
+        # Each connection can handle MAX_ASSETS_PER_WS (500) tokens
+        for i, client in enumerate(self.ws_clients):
+            start = i * MAX_ASSETS_PER_WS
+            end = start + MAX_ASSETS_PER_WS
+            batch = token_ids[start:end]
+            if batch:
+                log.info(f"Connection {i+1}: subscribing to {len(batch)} tokens")
+                await client.subscribe(batch)
 
     def _on_book_update(self, update: OrderBookUpdate) -> None:
         """Handle orderbook snapshot update."""
@@ -190,7 +230,12 @@ class RealtimeScanner:
         self._price_updates += 1
         # For price changes, get size from cached orderbook
         best_ask_size = None
-        orderbook = self.ws_client.get_orderbook(change.asset_id)
+        # Search for orderbook across all WebSocket clients
+        orderbook = None
+        for client in self.ws_clients:
+            orderbook = client.get_orderbook(change.asset_id)
+            if orderbook:
+                break
         if orderbook and orderbook.asks:
             best_ask_price = min(a.price for a in orderbook.asks)
             for a in orderbook.asks:
@@ -331,42 +376,65 @@ class RealtimeScanner:
         """Run the real-time scanner."""
         self._running = True
 
-        log.info("Starting real-time scanner")
+        log.info(
+            "Starting real-time scanner",
+            num_connections=self.num_connections,
+            max_markets=self.max_markets,
+        )
 
         # Load markets
         await self.load_markets()
 
-        # Run WebSocket with auto-reconnection, plus periodic tasks
-        await asyncio.gather(
-            self._run_websocket_with_reconnect(),
+        # Connect all WebSocket clients
+        for i, client in enumerate(self.ws_clients):
+            await client.connect()
+            log.info(f"WebSocket connection {i+1} established")
+
+        # Subscribe to markets (distributes across connections)
+        await self.subscribe_to_markets()
+
+        # Run all WebSocket listeners plus periodic tasks
+        tasks = [
+            self._run_websocket_with_reconnect(i, client)
+            for i, client in enumerate(self.ws_clients)
+        ]
+        tasks.extend([
             self._periodic_market_refresh(),
             self._periodic_stats(),
-        )
+        ])
+        await asyncio.gather(*tasks)
 
-    async def _run_websocket_with_reconnect(self) -> None:
-        """Run WebSocket with automatic reconnection."""
+    async def _run_websocket_with_reconnect(self, conn_id: int, client: WebSocketClient) -> None:
+        """Run a single WebSocket connection with automatic reconnection."""
         while self._running:
             try:
-                # Connect
-                await self.ws_client.connect()
-
-                # Subscribe to all markets
-                await self.subscribe_to_markets()
-
                 # Listen until disconnected
-                await self.ws_client.listen()
+                await client.listen()
 
             except Exception as e:
-                log.error("WebSocket error", error=str(e))
+                log.error(f"WebSocket {conn_id+1} error", error=str(e))
 
             if not self._running:
                 break
 
             # Reconnect with backoff
-            delay = min(self.ws_client._reconnect_delay, 30)
-            log.info("Reconnecting WebSocket", delay=delay)
+            delay = min(client._reconnect_delay, 30)
+            log.info(f"Reconnecting WebSocket {conn_id+1}", delay=delay)
             await asyncio.sleep(delay)
-            self.ws_client._reconnect_delay = min(delay * 2, 60)
+            client._reconnect_delay = min(delay * 2, 60)
+
+            # Reconnect
+            try:
+                await client.connect()
+                # Re-subscribe this connection's tokens
+                token_ids = list(self._token_to_market.keys())
+                start = conn_id * MAX_ASSETS_PER_WS
+                end = start + MAX_ASSETS_PER_WS
+                batch = token_ids[start:end]
+                if batch:
+                    await client.subscribe(batch)
+            except Exception as e:
+                log.error(f"WebSocket {conn_id+1} reconnect failed", error=str(e))
 
     async def _periodic_market_refresh(self, interval: float = 600) -> None:
         """Periodically refresh market list (every 10 min)."""
@@ -381,11 +449,12 @@ class RealtimeScanner:
 
                 # Only resubscribe if markets changed significantly
                 if abs(new_count - old_count) > 10:
-                    log.info("Market list changed, reconnecting WebSocket")
-                    # Clear subscriptions and let reconnect loop handle it
-                    self.ws_client._subscribed_assets.clear()
-                    if self.ws_client._ws:
-                        await self.ws_client._ws.close()
+                    log.info("Market list changed, reconnecting all WebSockets")
+                    # Close all connections to trigger reconnect
+                    for client in self.ws_clients:
+                        client._subscribed_assets.clear()
+                        if client._ws:
+                            await client._ws.close()
             except Exception as e:
                 log.error("Market refresh error", error=str(e))
 
@@ -400,7 +469,7 @@ class RealtimeScanner:
                 markets=stats["markets"],
                 price_updates=stats["price_updates"],
                 arbitrage_alerts=stats["arbitrage_alerts"],
-                ws_connected=stats["ws_connected"],
+                ws_connections=stats["ws_connections"],
             )
 
             # Write stats to file for dashboard
@@ -464,17 +533,22 @@ class RealtimeScanner:
     async def close(self) -> None:
         """Close all connections."""
         self.stop()
-        await self.ws_client.close()
+        for client in self.ws_clients:
+            await client.close()
         await self.gamma.close()
 
     def get_stats(self) -> dict:
         """Get scanner statistics."""
+        # Aggregate stats from all WebSocket connections
+        connected = sum(1 for c in self.ws_clients if c.is_connected)
+        total_subscribed = sum(c.subscribed_count for c in self.ws_clients)
         return {
             "markets": len(self._markets),
             "price_updates": self._price_updates,
             "arbitrage_alerts": self._arbitrage_alerts,
-            "ws_connected": self.ws_client.is_connected,
-            "subscribed_tokens": self.ws_client.subscribed_count,
+            "ws_connected": connected == len(self.ws_clients),
+            "ws_connections": f"{connected}/{len(self.ws_clients)}",
+            "subscribed_tokens": total_subscribed,
         }
 
     async def __aenter__(self) -> "RealtimeScanner":
