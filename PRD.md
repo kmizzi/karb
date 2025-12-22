@@ -375,11 +375,31 @@ CLOB API uses **L2 Authentication** via the `py-clob-client` library:
 
 ### Phase 4: Optimization
 
+**Completed:**
 - [x] Reduce latency (async CLOB client with httpx + HTTP/2)
 - [x] Connection pooling for order submission
 - [x] Parallel order signing (thread pool for CPU-bound EIP-712)
+
+**High Impact (Future):**
+- [ ] Pre-signed order templates (~7ms savings per order)
+  - Pre-sign orders for hot markets at multiple price points
+  - When opportunity appears, select nearest template and submit immediately
+- [ ] Parallel YES/NO signing in submit flow
+  - Sign both orders concurrently before posting both
+- [ ] WebSocket order book maintenance
+  - Maintain local order book state from deltas
+  - Detect opportunities without additional API calls
+
+**Medium Impact (Future):**
+- [ ] ProcessPoolExecutor for signing (avoid GIL contention)
+- [ ] Connection warming (periodic pings to keep HTTP/2 alive)
+- [ ] Market prioritization scoring (track historical arbitrage frequency)
 - [ ] Smart order sizing based on liquidity
-- [ ] Market prioritization scoring
+
+**Lower Impact (Future):**
+- [ ] DNS caching optimization
+- [ ] TCP tuning (TCP_NODELAY, buffer sizes)
+- [ ] Memory pre-allocation for order structures
 - [ ] Backtesting framework
 
 ---
