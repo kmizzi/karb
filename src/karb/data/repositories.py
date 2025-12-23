@@ -220,6 +220,61 @@ class AlertRepository:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+    @staticmethod
+    async def get_window_stats() -> dict[str, Any]:
+        """Get arb window duration statistics (how long opportunities last)."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT
+                    COUNT(*) as total_alerts,
+                    COUNT(duration_secs) as alerts_with_duration,
+                    AVG(duration_secs) as avg_duration_secs,
+                    MIN(duration_secs) as min_duration_secs,
+                    MAX(duration_secs) as max_duration_secs,
+                    AVG(CASE WHEN duration_secs < 60 THEN duration_secs END) as avg_under_60s,
+                    COUNT(CASE WHEN duration_secs < 1 THEN 1 END) as under_1s,
+                    COUNT(CASE WHEN duration_secs >= 1 AND duration_secs < 5 THEN 1 END) as between_1_5s,
+                    COUNT(CASE WHEN duration_secs >= 5 AND duration_secs < 30 THEN 1 END) as between_5_30s,
+                    COUNT(CASE WHEN duration_secs >= 30 AND duration_secs < 60 THEN 1 END) as between_30_60s,
+                    COUNT(CASE WHEN duration_secs >= 60 THEN 1 END) as over_60s
+                FROM alerts
+                WHERE duration_secs IS NOT NULL
+                """
+            )
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    "total_alerts": row["total_alerts"] or 0,
+                    "alerts_with_duration": row["alerts_with_duration"] or 0,
+                    "avg_duration_secs": round(row["avg_duration_secs"] or 0, 1),
+                    "min_duration_secs": round(row["min_duration_secs"] or 0, 1),
+                    "max_duration_secs": round(row["max_duration_secs"] or 0, 1),
+                    "avg_under_60s": round(row["avg_under_60s"] or 0, 1),
+                    "distribution": {
+                        "under_1s": row["under_1s"] or 0,
+                        "1_to_5s": row["between_1_5s"] or 0,
+                        "5_to_30s": row["between_5_30s"] or 0,
+                        "30_to_60s": row["between_30_60s"] or 0,
+                        "over_60s": row["over_60s"] or 0,
+                    },
+                }
+            return {
+                "total_alerts": 0,
+                "alerts_with_duration": 0,
+                "avg_duration_secs": 0,
+                "min_duration_secs": 0,
+                "max_duration_secs": 0,
+                "avg_under_60s": 0,
+                "distribution": {
+                    "under_1s": 0,
+                    "1_to_5s": 0,
+                    "5_to_30s": 0,
+                    "30_to_60s": 0,
+                    "over_60s": 0,
+                },
+            }
+
 
 class ExecutionRepository:
     """Repository for order executions."""

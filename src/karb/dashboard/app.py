@@ -552,6 +552,14 @@ def create_app() -> FastAPI:
             "count": len(data),
         }
 
+    @app.get("/api/arb-window-stats")
+    async def get_arb_window_stats(
+        username: str = Depends(verify_credentials),
+    ):
+        """Get arbitrage window duration statistics."""
+        stats = await AlertRepository.get_window_stats()
+        return stats
+
     return app
 
 

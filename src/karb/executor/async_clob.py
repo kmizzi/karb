@@ -422,7 +422,7 @@ class AsyncClobClient:
         self,
         orders: list[tuple[str, str, float, float, Optional[bool]]],
         order_type: str = "FOK",
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
         """
         Submit multiple orders in parallel with optimized latency.
 
@@ -432,7 +432,7 @@ class AsyncClobClient:
             order_type: Order type - "FOK" (Fill-or-Kill) recommended for arbitrage
 
         Returns:
-            List of API responses
+            Tuple of (list of API responses, timing dict with ms values)
         """
         t0 = time.time()
 
@@ -484,16 +484,23 @@ class AsyncClobClient:
         results = await asyncio.gather(*post_tasks, return_exceptions=True)
         t3 = time.time()
 
-        log.debug(
-            "Parallel order timing breakdown",
-            neg_risk_ms=int((t1 - t0) * 1000),
-            sign_ms=int((t2 - t1) * 1000),
-            submit_ms=int((t3 - t2) * 1000),
-            total_ms=int((t3 - t0) * 1000),
+        timing = {
+            "neg_risk_ms": int((t1 - t0) * 1000),
+            "sign_ms": int((t2 - t1) * 1000),
+            "submit_ms": int((t3 - t2) * 1000),
+            "total_ms": int((t3 - t0) * 1000),
+        }
+
+        log.info(
+            "Parallel order timing",
+            neg_risk_ms=timing["neg_risk_ms"],
+            sign_ms=timing["sign_ms"],
+            submit_ms=timing["submit_ms"],
+            total_ms=timing["total_ms"],
             order_count=len(orders),
         )
 
-        return results
+        return results, timing
 
     async def cancel_order(self, order_id: str) -> dict[str, Any]:
         """Cancel an order by ID."""

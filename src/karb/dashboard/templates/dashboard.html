@@ -1425,10 +1425,10 @@
                                         <tr class="timing-details" id="timing-${idx}" style="display: ${isExpanded ? 'table-row' : 'none'}; background: var(--bg-tertiary);">
                                             <td colspan="10" style="padding: 8px 16px;">
                                                 <div style="display: flex; gap: 24px; flex-wrap: wrap; font-size: 11px;">
-                                                    ${deltas.detection_to_execute_ms !== undefined ? `<span>📡 Detection→Execute: <b>${Math.round(deltas.detection_to_execute_ms)}ms</b></span>` : ''}
-                                                    ${deltas.order_signing_ms !== undefined ? `<span>✍️ Order Signing+Submit: <b>${Math.round(deltas.order_signing_ms)}ms</b></span>` : ''}
-                                                    ${deltas.total_execute_ms !== undefined ? `<span>⚡ Total Execute: <b>${Math.round(deltas.total_execute_ms)}ms</b></span>` : ''}
-                                                    ${deltas.total_latency_ms !== undefined ? `<span>🏁 End-to-End: <b>${Math.round(deltas.total_latency_ms)}ms</b></span>` : ''}
+                                                    ${deltas.neg_risk_ms !== undefined ? `<span>🔍 Neg Risk: <b>${deltas.neg_risk_ms}ms</b></span>` : ''}
+                                                    ${deltas.sign_ms !== undefined ? `<span>✍️ Sign: <b>${deltas.sign_ms}ms</b></span>` : ''}
+                                                    ${deltas.submit_ms !== undefined ? `<span>📤 Submit: <b>${deltas.submit_ms}ms</b></span>` : ''}
+                                                    ${deltas.total_execute_ms !== undefined ? `<span>⚡ Total: <b>${Math.round(deltas.total_execute_ms)}ms</b></span>` : ''}
                                                 </div>
                                             </td>
                                         </tr>`;

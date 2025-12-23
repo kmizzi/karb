@@ -120,6 +120,11 @@ class ExecutionTiming:
     no_submit_end: Optional[float] = None  # No order HTTP response received
     execute_end: Optional[float] = None  # When execute() returned
 
+    # Detailed breakdown from submit_orders_parallel (ms)
+    neg_risk_ms: Optional[int] = None  # Time for neg_risk API lookups
+    sign_ms: Optional[int] = None  # Time for order signing (CPU)
+    submit_ms: Optional[int] = None  # Time for HTTP submission
+
     def to_dict(self) -> dict:
         """Convert to dict with computed deltas."""
         data = {
@@ -145,6 +150,13 @@ class ExecutionTiming:
             deltas["total_execute_ms"] = round(self.execute_end - self.execute_start, 1)
         if self.opportunity_detected and self.execute_end:
             deltas["total_latency_ms"] = round(self.execute_end - self.opportunity_detected, 1)
+        # Include detailed breakdown from submit_orders_parallel
+        if self.neg_risk_ms is not None:
+            deltas["neg_risk_ms"] = self.neg_risk_ms
+        if self.sign_ms is not None:
+            deltas["sign_ms"] = self.sign_ms
+        if self.submit_ms is not None:
+            deltas["submit_ms"] = self.submit_ms
         data["deltas"] = deltas
         return data
 
@@ -947,28 +959,32 @@ class OrderExecutor:
 
         try:
             if async_client:
-                # Use native async client for low-latency parallel execution
-                # Sign both orders in parallel (CPU-bound, uses thread pool internally)
-                # Then submit both orders in parallel (network-bound, native async)
+                # Use optimized parallel execution: batch neg_risk + sign + submit
                 timing.order_signing_start = ExecutionTiming.now_ms()
-                yes_response, no_response = await asyncio.gather(
-                    self._submit_order_async(
+                orders = [
+                    (
                         opportunity.market.yes_token.token_id,
                         "BUY",
                         float(opportunity.yes_ask),
                         float(opportunity.max_trade_size),
                         None,  # Auto-detect neg_risk
                     ),
-                    self._submit_order_async(
+                    (
                         opportunity.market.no_token.token_id,
                         "BUY",
                         float(opportunity.no_ask),
                         float(opportunity.max_trade_size),
                         None,  # Auto-detect neg_risk
                     ),
-                    return_exceptions=True,
-                )
+                ]
+                responses, order_timing = await async_client.submit_orders_parallel(orders)
+                yes_response, no_response = responses[0], responses[1]
                 timing.order_signing_end = ExecutionTiming.now_ms()
+
+                # Store detailed timing breakdown
+                timing.neg_risk_ms = order_timing.get("neg_risk_ms", 0)
+                timing.sign_ms = order_timing.get("sign_ms", 0)
+                timing.submit_ms = order_timing.get("submit_ms", 0)
             else:
                 # Fallback to sync client wrapped in executor
                 timing.order_signing_start = ExecutionTiming.now_ms()
