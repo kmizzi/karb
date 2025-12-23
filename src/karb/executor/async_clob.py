@@ -198,11 +198,9 @@ class AsyncClobClient:
             maker_amount = int(size * 1e6)  # tokens
             taker_amount = int(size * price * 1e6)  # USDC
 
-        # Generate unique salt
-        salt = int(time.time() * 1000000) + int.from_bytes(
-            hashlib.sha256(f"{token_id}{side}{price}{size}".encode()).digest()[:8],
-            "big"
-        )
+        # Generate unique salt (matching py_clob_client's approach)
+        import random
+        salt = round(time.time() * random.random())
 
         # Select exchange based on neg_risk
         exchange = NEG_RISK_CTF_EXCHANGE if neg_risk else CTF_EXCHANGE
