@@ -383,8 +383,19 @@ def create_app() -> FastAPI:
         stats = await ExecutionRepository.get_stats()
 
         # Format executions for dashboard compatibility
-        formatted_executions = [
-            {
+        formatted_executions = []
+        for e in executions:
+            # Parse timing data from JSON if present
+            timing = None
+            timing_json = e.get("timing_data")
+            if timing_json:
+                try:
+                    import json
+                    timing = json.loads(timing_json)
+                except Exception:
+                    pass
+
+            formatted_executions.append({
                 "timestamp": e.get("timestamp", ""),
                 "market": e.get("market", ""),
                 "status": e.get("status", ""),
@@ -408,9 +419,8 @@ def create_app() -> FastAPI:
                 "expected_profit": float(e.get("expected_profit", 0) or 0),
                 "profit_pct": float(e.get("profit_pct", 0) or 0),
                 "market_liquidity": float(e.get("market_liquidity", 0) or 0),
-            }
-            for e in executions
-        ]
+                "timing": timing,
+            })
 
         return {
             "active_orders": [],  # Active orders are still in-memory

@@ -331,7 +331,9 @@ class RealtimeArbitrageBot:
         # Execute immediately (with lock to prevent concurrent executions)
         async with self._execution_lock:
             try:
-                result = await self.executor.execute(opportunity)
+                # Pass detection timestamp for latency tracking (convert to ms)
+                detection_timestamp_ms = alert.timestamp * 1000
+                result = await self.executor.execute(opportunity, detection_timestamp_ms=detection_timestamp_ms)
 
                 self.stats.trades_executed += 1
                 if result.status == ExecutionStatus.FILLED:

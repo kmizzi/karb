@@ -104,6 +104,57 @@ class OrderResult:
 
 
 @dataclass
+class ExecutionTiming:
+    """Timing data for execution flow analysis."""
+
+    # All times stored as epoch ms for easy math
+    opportunity_detected: Optional[float] = None  # When scanner found the arb
+    execute_start: Optional[float] = None  # When execute() was called
+    neg_risk_lookup_start: Optional[float] = None  # Start of neg_risk API call
+    neg_risk_lookup_end: Optional[float] = None  # End of neg_risk API call
+    order_signing_start: Optional[float] = None  # Start signing orders
+    order_signing_end: Optional[float] = None  # Done signing orders
+    yes_submit_start: Optional[float] = None  # Yes order HTTP request start
+    yes_submit_end: Optional[float] = None  # Yes order HTTP response received
+    no_submit_start: Optional[float] = None  # No order HTTP request start
+    no_submit_end: Optional[float] = None  # No order HTTP response received
+    execute_end: Optional[float] = None  # When execute() returned
+
+    def to_dict(self) -> dict:
+        """Convert to dict with computed deltas."""
+        data = {
+            "opportunity_detected": self.opportunity_detected,
+            "execute_start": self.execute_start,
+            "execute_end": self.execute_end,
+        }
+        # Compute deltas (ms between steps)
+        deltas = {}
+        if self.opportunity_detected and self.execute_start:
+            deltas["detection_to_execute_ms"] = round(self.execute_start - self.opportunity_detected, 1)
+        if self.execute_start and self.neg_risk_lookup_start:
+            deltas["execute_to_neg_risk_ms"] = round(self.neg_risk_lookup_start - self.execute_start, 1)
+        if self.neg_risk_lookup_start and self.neg_risk_lookup_end:
+            deltas["neg_risk_lookup_ms"] = round(self.neg_risk_lookup_end - self.neg_risk_lookup_start, 1)
+        if self.order_signing_start and self.order_signing_end:
+            deltas["order_signing_ms"] = round(self.order_signing_end - self.order_signing_start, 1)
+        if self.yes_submit_start and self.yes_submit_end:
+            deltas["yes_submit_ms"] = round(self.yes_submit_end - self.yes_submit_start, 1)
+        if self.no_submit_start and self.no_submit_end:
+            deltas["no_submit_ms"] = round(self.no_submit_end - self.no_submit_start, 1)
+        if self.execute_start and self.execute_end:
+            deltas["total_execute_ms"] = round(self.execute_end - self.execute_start, 1)
+        if self.opportunity_detected and self.execute_end:
+            deltas["total_latency_ms"] = round(self.execute_end - self.opportunity_detected, 1)
+        data["deltas"] = deltas
+        return data
+
+    @staticmethod
+    def now_ms() -> float:
+        """Get current time in epoch milliseconds."""
+        return time.time() * 1000
+
+
+@dataclass
 class ExecutionResult:
     """Result of an arbitrage execution (both orders)."""
 
@@ -114,6 +165,7 @@ class ExecutionResult:
     total_cost: Decimal = Decimal("0")
     expected_profit: Decimal = Decimal("0")
     timestamp: datetime = field(default_factory=datetime.utcnow)
+    timing: Optional[ExecutionTiming] = None  # Execution timing data
 
     @property
     def is_successful(self) -> bool:
@@ -754,6 +806,8 @@ class OrderExecutor:
             opp = result.opportunity
             # Calculate total market liquidity (sum of both sides)
             market_liquidity = float(opp.yes_size_available) + float(opp.no_size_available)
+            # Serialize timing data to JSON
+            timing_data = json.dumps(result.timing.to_dict()) if result.timing else None
 
             await ExecutionRepository.insert(
                 timestamp=result.timestamp.replace(tzinfo=timezone.utc).isoformat(),
@@ -775,6 +829,7 @@ class OrderExecutor:
                 expected_profit=float(result.expected_profit),
                 profit_pct=float(opp.profit_pct),
                 market_liquidity=market_liquidity,
+                timing_data=timing_data,
             )
         except Exception as e:
             log.debug("Failed to save execution to database", error=str(e))
@@ -818,7 +873,11 @@ class OrderExecutor:
                 profit_expected=float(opp.expected_profit_usd) / 2,
             ))
 
-    async def execute(self, opportunity: ArbitrageOpportunity) -> ExecutionResult:
+    async def execute(
+        self,
+        opportunity: ArbitrageOpportunity,
+        detection_timestamp_ms: Optional[float] = None,
+    ) -> ExecutionResult:
         """
         Execute an arbitrage opportunity.
 
@@ -826,10 +885,17 @@ class OrderExecutor:
 
         Args:
             opportunity: The arbitrage opportunity to execute
+            detection_timestamp_ms: When the opportunity was detected (epoch ms)
 
         Returns:
             Execution result
         """
+        # Initialize timing tracker
+        timing = ExecutionTiming(
+            opportunity_detected=detection_timestamp_ms,
+            execute_start=ExecutionTiming.now_ms(),
+        )
+
         self.stats.total_attempts += 1
 
         # Dry run mode
@@ -840,6 +906,7 @@ class OrderExecutor:
         async_client = await self._ensure_async_client()
         if not async_client and not self._clob_client:
             log.error("No CLOB client initialized, cannot execute orders")
+            timing.execute_end = ExecutionTiming.now_ms()
             return ExecutionResult(
                 opportunity=opportunity,
                 yes_order=OrderResult(
@@ -859,6 +926,7 @@ class OrderExecutor:
                     error="CLOB client not initialized - check POLY_API_KEY/SECRET",
                 ),
                 status=ExecutionStatus.FAILED,
+                timing=timing,
             )
 
         log.info(
@@ -877,6 +945,7 @@ class OrderExecutor:
                 # Use native async client for low-latency parallel execution
                 # Sign both orders in parallel (CPU-bound, uses thread pool internally)
                 # Then submit both orders in parallel (network-bound, native async)
+                timing.order_signing_start = ExecutionTiming.now_ms()
                 yes_response, no_response = await asyncio.gather(
                     self._submit_order_async(
                         opportunity.market.yes_token.token_id,
@@ -894,8 +963,10 @@ class OrderExecutor:
                     ),
                     return_exceptions=True,
                 )
+                timing.order_signing_end = ExecutionTiming.now_ms()
             else:
                 # Fallback to sync client wrapped in executor
+                timing.order_signing_start = ExecutionTiming.now_ms()
                 loop = asyncio.get_event_loop()
                 yes_response, no_response = await asyncio.gather(
                     loop.run_in_executor(
@@ -916,9 +987,11 @@ class OrderExecutor:
                     ),
                     return_exceptions=True,
                 )
+                timing.order_signing_end = ExecutionTiming.now_ms()
         except Exception as e:
             log.error("Order submission failed", error=str(e))
             self.stats.failed += 1
+            timing.execute_end = ExecutionTiming.now_ms()
             return ExecutionResult(
                 opportunity=opportunity,
                 yes_order=OrderResult(
@@ -938,6 +1011,7 @@ class OrderExecutor:
                     error=str(e),
                 ),
                 status=ExecutionStatus.FAILED,
+                timing=timing,
             )
 
         # Parse initial responses
@@ -1076,6 +1150,7 @@ class OrderExecutor:
                     market_name=opportunity.market.question,
                 )
 
+        timing.execute_end = ExecutionTiming.now_ms()
         result = ExecutionResult(
             opportunity=opportunity,
             yes_order=yes_result,
@@ -1083,6 +1158,7 @@ class OrderExecutor:
             status=status,
             total_cost=total_cost,
             expected_profit=opportunity.expected_profit_usd if status == ExecutionStatus.FILLED else Decimal("0"),
+            timing=timing,
         )
 
         self._execution_history.append(result)

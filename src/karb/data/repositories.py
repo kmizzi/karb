@@ -227,6 +227,7 @@ class ExecutionRepository:
         expected_profit: float = 0.0,
         profit_pct: Optional[float] = None,
         market_liquidity: Optional[float] = None,
+        timing_data: Optional[str] = None,
     ) -> int:
         """Insert a new execution record."""
         async with get_async_db() as conn:
@@ -236,14 +237,14 @@ class ExecutionRepository:
                     timestamp, market, status,
                     yes_order_id, yes_status, yes_price, yes_size, yes_filled_size, yes_error,
                     no_order_id, no_status, no_price, no_size, no_filled_size, no_error,
-                    total_cost, expected_profit, profit_pct, market_liquidity
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    total_cost, expected_profit, profit_pct, market_liquidity, timing_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp, market, status,
                     yes_order_id, yes_status, yes_price, yes_size, yes_filled_size, yes_error,
                     no_order_id, no_status, no_price, no_size, no_filled_size, no_error,
-                    total_cost, expected_profit, profit_pct, market_liquidity
+                    total_cost, expected_profit, profit_pct, market_liquidity, timing_data
                 ),
             )
             exec_id = cursor.lastrowid or 0

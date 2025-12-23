@@ -1174,11 +1174,12 @@
                                 <th>YES Order</th>
                                 <th>NO Order</th>
                                 <th>Status</th>
+                                <th>Latency</th>
                                 <th>Cost</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${recentExecs.map(e => {
+                            ${recentExecs.map((e, idx) => {
                                 // Determine display status with more detail
                                 let displayStatus = e.status.toUpperCase();
                                 let statusColor = 'var(--accent-red)';
@@ -1205,10 +1206,34 @@
                                 // Format liquidity (sum of both sides available)
                                 const liquidity = e.market_liquidity ? `$${e.market_liquidity.toLocaleString(undefined, {maximumFractionDigits: 0})}` : '-';
 
+                                // Format timing info
+                                const timing = e.timing;
+                                let latencyDisplay = '-';
+                                let timingDetails = '';
+                                if (timing && timing.deltas) {
+                                    const totalMs = timing.deltas.total_execute_ms || timing.deltas.total_latency_ms;
+                                    if (totalMs) {
+                                        latencyDisplay = `${Math.round(totalMs)}ms`;
+                                    }
+                                    // Build timing breakdown for expandable row
+                                    const deltas = timing.deltas;
+                                    timingDetails = `
+                                        <tr class="timing-details" id="timing-${idx}" style="display: none; background: var(--bg-tertiary);">
+                                            <td colspan="9" style="padding: 8px 16px;">
+                                                <div style="display: flex; gap: 24px; flex-wrap: wrap; font-size: 11px;">
+                                                    ${deltas.detection_to_execute_ms !== undefined ? `<span>📡 Detection→Execute: <b>${Math.round(deltas.detection_to_execute_ms)}ms</b></span>` : ''}
+                                                    ${deltas.order_signing_ms !== undefined ? `<span>✍️ Order Signing+Submit: <b>${Math.round(deltas.order_signing_ms)}ms</b></span>` : ''}
+                                                    ${deltas.total_execute_ms !== undefined ? `<span>⚡ Total Execute: <b>${Math.round(deltas.total_execute_ms)}ms</b></span>` : ''}
+                                                    ${deltas.total_latency_ms !== undefined ? `<span>🏁 End-to-End: <b>${Math.round(deltas.total_latency_ms)}ms</b></span>` : ''}
+                                                </div>
+                                            </td>
+                                        </tr>`;
+                                }
+
                                 const yesError = e.yes_order.error ? `<div style="color: var(--accent-red); font-size: 10px; max-width: 200px; word-wrap: break-word;">${e.yes_order.error}</div>` : '';
                                 const noError = e.no_order.error ? `<div style="color: var(--accent-red); font-size: 10px; max-width: 200px; word-wrap: break-word;">${e.no_order.error}</div>` : '';
                                 return `
-                                <tr>
+                                <tr style="cursor: ${timing ? 'pointer' : 'default'};" onclick="${timing ? `toggleTimingRow(${idx})` : ''}">
                                     <td>${formatDateTime(e.timestamp)}</td>
                                     <td>${e.market}</td>
                                     <td style="color: var(--accent-green); font-weight: 600;">${arbPct}</td>
@@ -1228,8 +1253,10 @@
                                         ${noError}
                                     </td>
                                     <td><span style="color: ${statusColor}; font-weight: 600;">${displayStatus}</span></td>
+                                    <td style="color: var(--accent-blue); font-weight: 500;">${latencyDisplay}${timing ? ' ▼' : ''}</td>
                                     <td>$${e.total_cost.toFixed(2)}</td>
                                 </tr>
+                                ${timingDetails}
                             `}).join('')}
                         </tbody>
                     </table></div>`;
@@ -1399,6 +1426,13 @@
             });
             if (icon) {
                 icon.textContent = isHidden ? '▼' : '▶';
+            }
+        }
+
+        function toggleTimingRow(idx) {
+            const row = document.getElementById(`timing-${idx}`);
+            if (row) {
+                row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
             }
         }
 

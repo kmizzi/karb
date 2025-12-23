@@ -89,6 +89,8 @@ async def init_async_db() -> None:
     async with get_async_db() as conn:
         await conn.executescript(_get_schema())
         log.info("Database schema initialized (async)", path=str(get_db_path()))
+    # Run migrations to add any new columns to existing tables
+    await run_async_migrations()
 
 
 # =============================================================================
@@ -195,7 +197,10 @@ CREATE TABLE IF NOT EXISTS executions (
     no_filled_size REAL,
     no_error TEXT,
     total_cost REAL DEFAULT 0,
-    expected_profit REAL DEFAULT 0
+    expected_profit REAL DEFAULT 0,
+    profit_pct REAL,
+    market_liquidity REAL,
+    timing_data TEXT
 );
 
 -- Scanner stats (replaces scanner_stats.json) - single row, updated in place
@@ -252,3 +257,43 @@ CREATE INDEX IF NOT EXISTS idx_executions_timestamp ON executions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON portfolio_snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_closed_positions_timestamp ON closed_positions(timestamp);
 """
+
+
+def _get_migrations() -> list[str]:
+    """Return migration SQL statements for adding new columns to existing tables.
+
+    These use 'ALTER TABLE ... ADD COLUMN' with error handling since
+    SQLite will raise an error if the column already exists.
+    """
+    return [
+        # Add profit_pct to executions (added for arb % visibility)
+        "ALTER TABLE executions ADD COLUMN profit_pct REAL",
+        # Add market_liquidity to executions (added for liquidity visibility)
+        "ALTER TABLE executions ADD COLUMN market_liquidity REAL",
+        # Add timing_data to executions (added for latency tracking)
+        "ALTER TABLE executions ADD COLUMN timing_data TEXT",
+    ]
+
+
+async def run_async_migrations() -> None:
+    """Run migrations to add new columns to existing tables (async)."""
+    async with get_async_db() as conn:
+        for migration in _get_migrations():
+            try:
+                await conn.execute(migration)
+                log.debug("Migration applied", sql=migration[:50])
+            except Exception:
+                # Column likely already exists, ignore
+                pass
+
+
+def run_migrations() -> None:
+    """Run migrations to add new columns to existing tables (sync)."""
+    with get_db() as conn:
+        for migration in _get_migrations():
+            try:
+                conn.execute(migration)
+                log.debug("Migration applied", sql=migration[:50])
+            except Exception:
+                # Column likely already exists, ignore
+                pass
