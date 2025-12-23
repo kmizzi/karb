@@ -152,17 +152,33 @@ def create_app() -> FastAPI:
                 if size == 0:
                     continue  # Skip zero positions
 
+                # Determine status
+                redeemable = p.get("redeemable", False)
+                cur_price = float(p.get("curPrice", 0) or 0)
+                if redeemable:
+                    if cur_price >= 0.99:
+                        status = "WON"
+                    elif cur_price <= 0.01:
+                        status = "LOST"
+                    else:
+                        status = "RESOLVED"
+                else:
+                    status = "OPEN"
+
                 formatted.append({
                     "market": p.get("title", p.get("market", "")),
                     "outcome": p.get("outcome", ""),
                     "size": size,
                     "avg_price": float(p.get("avgPrice", 0) or 0),
-                    "current_price": float(p.get("curPrice", 0) or 0),
+                    "current_price": cur_price,
                     "pnl": float(p.get("cashPnl", 0) or 0),
                     "realized_pnl": float(p.get("realizedPnl", 0) or 0),
                     "initial_value": float(p.get("initialValue", 0) or 0),
                     "current_value": float(p.get("currentValue", 0) or 0),
                     "token_id": p.get("asset", ""),
+                    "status": status,
+                    "redeemable": redeemable,
+                    "end_date": p.get("endDate", ""),
                 })
 
             return {"positions": formatted, "count": len(formatted)}

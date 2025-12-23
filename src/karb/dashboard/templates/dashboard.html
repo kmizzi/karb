@@ -917,6 +917,7 @@
                                 <tr>
                                     <th>Market</th>
                                     <th>Outcome</th>
+                                    <th>Status</th>
                                     <th>Size</th>
                                     <th>Avg Price</th>
                                     <th>Current</th>
@@ -926,10 +927,15 @@
                             <tbody>
                                 ${data.positions.map(p => {
                                     const pnlColor = p.pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                                    const statusColor = p.status === 'WON' ? 'var(--accent-green)'
+                                        : p.status === 'LOST' ? 'var(--accent-red)'
+                                        : p.status === 'OPEN' ? 'var(--accent-blue)'
+                                        : 'var(--accent-yellow)';
                                     return `
                                     <tr>
                                         <td>${p.market || p.token_id?.substring(0, 20) || 'Unknown'}</td>
                                         <td><span style="color: ${p.outcome === 'Yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${p.outcome || '-'}</span></td>
+                                        <td><span style="color: ${statusColor}; font-weight: 600;">${p.status}${p.redeemable ? ' 💰' : ''}</span></td>
                                         <td>${p.size}</td>
                                         <td>$${p.avg_price?.toFixed(3) || '-'}</td>
                                         <td>$${p.current_price?.toFixed(3) || '-'}</td>
