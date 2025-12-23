@@ -783,15 +783,15 @@
                     </div>
                     <div class="stat-row">
                         <span>Today's Volume</span>
-                        <span>$${(daily.total_cost || 0).toFixed(2)}</span>
+                        <span>$${(daily.total_volume || 0).toFixed(2)}</span>
                     </div>
                     <div class="stat-row">
                         <span>All-Time Trades</span>
-                        <span>${allTime.trade_count || 0}</span>
+                        <span>${allTime.total_trades || 0}</span>
                     </div>
                     <div class="stat-row">
                         <span>All-Time Volume</span>
-                        <span>$${(allTime.total_cost || 0).toFixed(2)}</span>
+                        <span>$${(allTime.total_volume || 0).toFixed(2)}</span>
                     </div>
                 `;
             } catch (e) {
