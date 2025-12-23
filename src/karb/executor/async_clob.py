@@ -410,20 +410,22 @@ class AsyncClobClient:
         return response.json()
 
     async def get_positions(self) -> list[dict]:
-        """Get current positions."""
-        path = "/positions"
-        headers = self._get_l2_headers("GET", path)
+        """Get current positions from the Data API."""
+        # Positions are on the Data API, not the CLOB API
+        data_api_url = "https://data-api.polymarket.com"
+        path = f"/positions?user={self.address}"
 
-        response = await self._client.get(
-            f"{self.host}{path}",
-            headers=headers,
-        )
+        try:
+            response = await self._client.get(f"{data_api_url}{path}")
 
-        if response.status_code != 200:
-            log.error("Failed to get positions", status=response.status_code)
+            if response.status_code != 200:
+                log.error("Failed to get positions", status=response.status_code, body=response.text[:200])
+                return []
+
+            return response.json()
+        except Exception as e:
+            log.error("Error fetching positions", error=str(e))
             return []
-
-        return response.json()
 
 
 async def create_async_clob_client() -> Optional[AsyncClobClient]:

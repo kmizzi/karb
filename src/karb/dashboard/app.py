@@ -144,17 +144,24 @@ def create_app() -> FastAPI:
             positions = await client.get_positions()
             await client.close()
 
-            # Format positions for display
+            # Format positions for display - Data API format
             formatted = []
             for p in positions:
+                # Data API returns: asset, size, avgPrice, curPrice, initialValue, currentValue, cashPnl, etc.
+                size = float(p.get("size", 0) or 0)
+                if size == 0:
+                    continue  # Skip zero positions
+
                 formatted.append({
-                    "market": p.get("market", ""),
+                    "market": p.get("title", p.get("market", "")),
                     "outcome": p.get("outcome", ""),
-                    "size": float(p.get("size", 0)),
-                    "avg_price": float(p.get("avgPrice", 0)),
-                    "current_price": float(p.get("curPrice", 0)),
-                    "pnl": float(p.get("pnl", 0)),
-                    "realized_pnl": float(p.get("realizedPnl", 0)),
+                    "size": size,
+                    "avg_price": float(p.get("avgPrice", 0) or 0),
+                    "current_price": float(p.get("curPrice", 0) or 0),
+                    "pnl": float(p.get("cashPnl", 0) or 0),
+                    "realized_pnl": float(p.get("realizedPnl", 0) or 0),
+                    "initial_value": float(p.get("initialValue", 0) or 0),
+                    "current_value": float(p.get("currentValue", 0) or 0),
                     "token_id": p.get("asset", ""),
                 })
 
