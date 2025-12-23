@@ -485,6 +485,10 @@ class RealtimeArbitrageBot:
         # Wait a bit before first record
         await asyncio.sleep(10)
 
+        # Initialize baseline to current value to avoid huge first delta after restart
+        scanner_stats = self.scanner.get_stats()
+        self._last_minute_price_updates = scanner_stats.get("price_updates", 0)
+
         log.info("Minute stats task started", interval=f"{self.MINUTE_STATS_INTERVAL}s")
 
         while self._running:
