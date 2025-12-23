@@ -373,6 +373,34 @@ class RealtimeScanner:
         first_seen = self._active_opportunities[market_id]
         duration_secs = (now - first_seen).total_seconds()
 
+        # Try to get fresh liquidity data from cached orderbooks if missing
+        yes_size = prices.yes_best_ask_size
+        no_size = prices.no_best_ask_size
+
+        if yes_size is None or no_size is None:
+            # Look up orderbooks from WebSocket clients
+            for client in self.ws_clients:
+                if yes_size is None:
+                    yes_book = client.get_orderbook(prices.market.yes_token.token_id)
+                    if yes_book and yes_book.asks:
+                        best_ask_price = min(a.price for a in yes_book.asks)
+                        for a in yes_book.asks:
+                            if a.price == best_ask_price:
+                                yes_size = a.size
+                                prices.yes_best_ask_size = yes_size  # Update cache
+                                break
+                if no_size is None:
+                    no_book = client.get_orderbook(prices.market.no_token.token_id)
+                    if no_book and no_book.asks:
+                        best_ask_price = min(a.price for a in no_book.asks)
+                        for a in no_book.asks:
+                            if a.price == best_ask_price:
+                                no_size = a.size
+                                prices.no_best_ask_size = no_size  # Update cache
+                                break
+                if yes_size is not None and no_size is not None:
+                    break
+
         alert = ArbitrageAlert(
             market=prices.market,
             yes_ask=prices.yes_best_ask or Decimal("0"),
@@ -380,8 +408,8 @@ class RealtimeScanner:
             combined_cost=combined,
             profit_pct=profit,
             timestamp=asyncio.get_event_loop().time(),
-            yes_size_available=prices.yes_best_ask_size or Decimal("0"),
-            no_size_available=prices.no_best_ask_size or Decimal("0"),
+            yes_size_available=yes_size or Decimal("0"),
+            no_size_available=no_size or Decimal("0"),
         )
 
         # Calculate days until resolution for logging
