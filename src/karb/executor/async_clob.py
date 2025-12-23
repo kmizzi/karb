@@ -142,6 +142,32 @@ class AsyncClobClient:
         """Close the HTTP client."""
         await self._client.aclose()
 
+    async def get_neg_risk(self, token_id: str) -> bool:
+        """
+        Check if a token is neg_risk (uses NEG_RISK_CTF_EXCHANGE).
+
+        Results are cached to avoid repeated API calls.
+        """
+        if token_id in self._neg_risk:
+            return self._neg_risk[token_id]
+
+        try:
+            response = await self._client.get(
+                f"{self.host}/neg-risk",
+                params={"token_id": token_id},
+            )
+            if response.status_code == 200:
+                data = response.json()
+                is_neg_risk = data.get("neg_risk", False)
+                self._neg_risk[token_id] = is_neg_risk
+                return is_neg_risk
+        except Exception as e:
+            log.warning("Failed to check neg_risk", token_id=token_id, error=str(e))
+
+        # Default to False if API call fails
+        self._neg_risk[token_id] = False
+        return False
+
     def _build_hmac_signature(
         self,
         timestamp: int,
@@ -287,13 +313,20 @@ class AsyncClobClient:
         side: str,
         price: float,
         size: float,
-        neg_risk: bool = False,
+        neg_risk: Optional[bool] = None,
     ) -> dict[str, Any]:
         """
         Sign and submit an order in one call.
 
+        Args:
+            neg_risk: If None, auto-detects from API. If provided, uses that value.
+
         For maximum parallelization, use sign_order + post_order separately.
         """
+        # Auto-detect neg_risk if not provided
+        if neg_risk is None:
+            neg_risk = await self.get_neg_risk(token_id)
+
         # Run signing in thread pool to not block event loop
         loop = asyncio.get_event_loop()
         signed_order = await loop.run_in_executor(
@@ -310,17 +343,25 @@ class AsyncClobClient:
 
     async def submit_orders_parallel(
         self,
-        orders: list[tuple[str, str, float, float, bool]],
+        orders: list[tuple[str, str, float, float, Optional[bool]]],
     ) -> list[dict[str, Any]]:
         """
         Submit multiple orders in parallel.
 
         Args:
             orders: List of (token_id, side, price, size, neg_risk) tuples
+                    neg_risk can be None for auto-detection
 
         Returns:
             List of API responses
         """
+        # Auto-detect neg_risk for orders where it's None
+        resolved_orders = []
+        for token_id, side, price, size, neg_risk in orders:
+            if neg_risk is None:
+                neg_risk = await self.get_neg_risk(token_id)
+            resolved_orders.append((token_id, side, price, size, neg_risk))
+
         # Sign all orders in parallel using thread pool
         loop = asyncio.get_event_loop()
         sign_tasks = [
@@ -333,7 +374,7 @@ class AsyncClobClient:
                 size,
                 neg_risk,
             )
-            for token_id, side, price, size, neg_risk in orders
+            for token_id, side, price, size, neg_risk in resolved_orders
         ]
         signed_orders = await asyncio.gather(*sign_tasks)
 

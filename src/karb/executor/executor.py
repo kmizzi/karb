@@ -279,7 +279,7 @@ class OrderExecutor:
 
             self._save_orders_state()
 
-    async def _submit_order_async(self, token_id: str, side: str, price: float, size: float, neg_risk: bool = False) -> dict[str, Any]:
+    async def _submit_order_async(self, token_id: str, side: str, price: float, size: float, neg_risk: Optional[bool] = None) -> dict[str, Any]:
         """
         Submit an order using the async CLOB client (low-latency).
 
@@ -288,7 +288,7 @@ class OrderExecutor:
             side: "BUY" or "SELL"
             price: Price per token
             size: Number of tokens
-            neg_risk: Whether this is a neg_risk market
+            neg_risk: Whether this is a neg_risk market. If None, auto-detects.
 
         Returns:
             API response
@@ -756,8 +756,8 @@ class OrderExecutor:
             size=float(opportunity.max_trade_size),
         )
 
-        # Determine if this is a neg_risk market (from market metadata if available)
-        neg_risk = getattr(opportunity.market, 'neg_risk', False)
+        # Let async client auto-detect neg_risk from API (pass None)
+        # This ensures correct exchange contract is used for signing
 
         try:
             if async_client:
@@ -770,14 +770,14 @@ class OrderExecutor:
                         "BUY",
                         float(opportunity.yes_ask),
                         float(opportunity.max_trade_size),
-                        neg_risk,
+                        None,  # Auto-detect neg_risk
                     ),
                     self._submit_order_async(
                         opportunity.market.no_token.token_id,
                         "BUY",
                         float(opportunity.no_ask),
                         float(opportunity.max_trade_size),
-                        neg_risk,
+                        None,  # Auto-detect neg_risk
                     ),
                     return_exceptions=True,
                 )
