@@ -558,11 +558,11 @@
                         <span id="stat-markets">--</span>
                     </div>
                     <div class="stat-row">
-                        <span>Price Updates</span>
+                        <span>Price Updates (Today)</span>
                         <span id="stat-updates">--</span>
                     </div>
                     <div class="stat-row">
-                        <span>Arbitrage Alerts</span>
+                        <span>Arbitrage Alerts (Today)</span>
                         <span id="stat-alerts" class="positive">--</span>
                     </div>
                 </div>
@@ -859,10 +859,12 @@
                     </span>
                 `;
 
-                // Update scanner stats
+                // Update scanner stats (show daily values, fallback to cumulative)
                 document.getElementById('stat-markets').textContent = data.scanner.markets;
-                document.getElementById('stat-updates').textContent = data.scanner.price_updates.toLocaleString();
-                document.getElementById('stat-alerts').textContent = data.scanner.arbitrage_alerts;
+                const priceUpdatesToday = data.scanner.price_updates_today ?? data.scanner.price_updates;
+                const alertsToday = data.scanner.arbitrage_alerts_today ?? data.scanner.arbitrage_alerts;
+                document.getElementById('stat-updates').textContent = priceUpdatesToday.toLocaleString();
+                document.getElementById('stat-alerts').textContent = alertsToday;
 
                 // Update config
                 document.getElementById('config-mode').innerHTML = data.bot.dry_run
@@ -871,12 +873,12 @@
                 document.getElementById('config-profit').textContent = data.bot.min_profit;
                 document.getElementById('config-position').textContent = data.bot.max_position;
 
-                // Log price updates delta
-                const updatesDelta = data.scanner.price_updates - lastPriceUpdates;
+                // Log price updates delta (use daily value for consistency)
+                const updatesDelta = priceUpdatesToday - lastPriceUpdates;
                 if (lastPriceUpdates > 0 && updatesDelta > 0) {
                     addLogLine('price', `Received ${updatesDelta} price updates (${data.scanner.markets} markets)`);
                 }
-                lastPriceUpdates = data.scanner.price_updates;
+                lastPriceUpdates = priceUpdatesToday;
 
             } catch (e) {
                 console.error('Status fetch error:', e);
@@ -1127,7 +1129,7 @@
                             </div>
                             <div class="alert-details" style="margin-top: 4px;">
                                 <span style="color: var(--accent-red);">Liquidity: $${minLiquidity.toFixed(2)} (need $${alert.min_required})</span>
-                                <span style="margin-left: 12px; color: #888;">YES: $${alert.yes_liquidity.toFixed(2)} | NO: $${alert.no_liquidity.toFixed(2)}</span>
+                                <span style="margin-left: 12px; color: #888;">YES Liq: $${alert.yes_liquidity.toFixed(2)} | NO Liq: $${alert.no_liquidity.toFixed(2)}</span>
                                 <span style="margin-left: 12px; color: #666;">Spotted: ${alertTime}</span>
                             </div>
                         </div>

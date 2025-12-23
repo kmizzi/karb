@@ -212,7 +212,10 @@ CREATE TABLE IF NOT EXISTS scanner_stats (
     ws_connected INTEGER DEFAULT 0,
     ws_connections TEXT,
     subscribed_tokens INTEGER DEFAULT 0,
-    last_update REAL
+    last_update REAL,
+    last_reset_date TEXT,
+    price_updates_baseline INTEGER DEFAULT 0,
+    arbitrage_alerts_baseline INTEGER DEFAULT 0
 );
 
 -- Execution stats (aggregate stats)
@@ -312,6 +315,11 @@ def _get_migrations() -> list[str]:
         "ALTER TABLE executions ADD COLUMN market_liquidity REAL",
         # Add timing_data to executions (added for latency tracking)
         "ALTER TABLE executions ADD COLUMN timing_data TEXT",
+        # Add last_reset_date to scanner_stats (for daily reset tracking)
+        "ALTER TABLE scanner_stats ADD COLUMN last_reset_date TEXT",
+        # Add baseline columns for daily stats calculation
+        "ALTER TABLE scanner_stats ADD COLUMN price_updates_baseline INTEGER DEFAULT 0",
+        "ALTER TABLE scanner_stats ADD COLUMN arbitrage_alerts_baseline INTEGER DEFAULT 0",
     ]
 
 

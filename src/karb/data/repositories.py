@@ -5,6 +5,7 @@ All repository methods are async to avoid blocking the trading loop.
 
 from datetime import datetime, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from karb.data.database import get_async_db, get_db
 from karb.utils.logging import get_logger
@@ -328,6 +329,56 @@ class ExecutionRepository:
 class StatsRepository:
     """Repository for scanner stats."""
 
+    # PST timezone for daily reset
+    PST = ZoneInfo("America/Los_Angeles")
+
+    @staticmethod
+    def _get_pst_date() -> str:
+        """Get current date in PST timezone as YYYY-MM-DD string."""
+        return datetime.now(StatsRepository.PST).strftime("%Y-%m-%d")
+
+    @staticmethod
+    async def check_daily_reset(
+        current_price_updates: int = 0,
+        current_arbitrage_alerts: int = 0,
+    ) -> bool:
+        """Check if we need to reset baselines for a new day (PST). Returns True if reset was performed."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                "SELECT last_reset_date, price_updates, arbitrage_alerts FROM scanner_stats WHERE id = 1"
+            )
+            row = await cursor.fetchone()
+            current_date = StatsRepository._get_pst_date()
+
+            if row and row["last_reset_date"] != current_date:
+                # New day - update baselines to current cumulative values
+                # This way: daily = cumulative - baseline
+                await conn.execute(
+                    """
+                    UPDATE scanner_stats SET
+                        price_updates_baseline = ?,
+                        arbitrage_alerts_baseline = ?,
+                        last_reset_date = ?
+                    WHERE id = 1
+                    """,
+                    (current_price_updates, current_arbitrage_alerts, current_date),
+                )
+                log.info("Daily stats baseline reset (PST)", date=current_date)
+                return True
+            elif row and row["last_reset_date"] is None:
+                # First time - set baselines and date
+                await conn.execute(
+                    """
+                    UPDATE scanner_stats SET
+                        price_updates_baseline = ?,
+                        arbitrage_alerts_baseline = ?,
+                        last_reset_date = ?
+                    WHERE id = 1
+                    """,
+                    (current_price_updates, current_arbitrage_alerts, current_date),
+                )
+            return False
+
     @staticmethod
     async def update(
         markets: int = 0,
@@ -337,7 +388,10 @@ class StatsRepository:
         ws_connections: str = "",
         subscribed_tokens: int = 0,
     ) -> None:
-        """Update scanner stats (upsert)."""
+        """Update scanner stats (upsert). Checks for daily reset first."""
+        # Check for daily reset first (pass current values to set as new baselines)
+        await StatsRepository.check_daily_reset(price_updates, arbitrage_alerts)
+
         async with get_async_db() as conn:
             await conn.execute(
                 """
@@ -360,7 +414,7 @@ class StatsRepository:
 
     @staticmethod
     async def get() -> dict[str, Any]:
-        """Get current scanner stats."""
+        """Get current scanner stats with daily values calculated."""
         async with get_async_db() as conn:
             cursor = await conn.execute(
                 "SELECT * FROM scanner_stats WHERE id = 1"
@@ -369,6 +423,13 @@ class StatsRepository:
             if row:
                 stats = dict(row)
                 stats["ws_connected"] = bool(stats.get("ws_connected", 0))
+
+                # Calculate daily values (cumulative - baseline)
+                baseline_updates = stats.get("price_updates_baseline") or 0
+                baseline_alerts = stats.get("arbitrage_alerts_baseline") or 0
+                stats["price_updates_today"] = max(0, stats.get("price_updates", 0) - baseline_updates)
+                stats["arbitrage_alerts_today"] = max(0, stats.get("arbitrage_alerts", 0) - baseline_alerts)
+
                 return stats
             return {}
 
