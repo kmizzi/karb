@@ -71,22 +71,22 @@ class SignedOrder:
     signature: str
 
     def to_dict(self) -> dict:
-        """Convert to API payload format."""
+        """Convert to API payload format matching py_clob_client exactly."""
         # Side must be string "BUY" or "SELL", not integer
         side_str = "BUY" if self.side == 0 else "SELL"
         return {
-            "salt": str(self.salt),
+            "salt": self.salt,  # Keep as integer
             "maker": self.maker,
             "signer": self.signer,
             "taker": self.taker,
-            "tokenId": self.token_id,
+            "tokenId": self.token_id,  # String
             "makerAmount": str(self.maker_amount),
             "takerAmount": str(self.taker_amount),
             "expiration": str(self.expiration),
             "nonce": str(self.nonce),
             "feeRateBps": str(self.fee_rate_bps),
             "side": side_str,
-            "signatureType": self.signature_type,
+            "signatureType": self.signature_type,  # Keep as integer
             "signature": self.signature,
         }
 
@@ -246,7 +246,7 @@ class AsyncClobClient:
             fee_rate_bps=fee_rate_bps,
             side=side_int,
             signature_type=0,
-            signature=signed.signature.hex(),
+            signature="0x" + signed.signature.hex(),  # Must include 0x prefix
         )
 
     async def post_order(
