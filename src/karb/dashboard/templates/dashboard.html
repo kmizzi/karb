@@ -605,32 +605,46 @@
 
         <!-- Charts Section -->
         <div class="charts-grid">
-            <!-- Hourly Activity Chart -->
+            <!-- Price Updates Chart -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">📊 Hourly Activity (Last 24h)</span>
+                    <span class="card-title">📊 Price Updates (Last 24h)</span>
                     <span class="refresh-indicator">Live</span>
                 </div>
                 <div class="chart-container">
-                    <canvas id="hourly-chart"></canvas>
+                    <canvas id="price-updates-chart"></canvas>
                 </div>
-                <div id="hourly-chart-empty" class="chart-empty" style="display: none;">
-                    No hourly data yet. Data will appear after the bot runs for at least 1 hour.
+                <div id="price-updates-chart-empty" class="chart-empty" style="display: none;">
+                    No data yet. Chart will populate when bot starts receiving updates.
                 </div>
             </div>
 
-            <!-- Daily Executions Chart -->
+            <!-- Markets Chart -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">📈 Daily Executions (Last 30d)</span>
+                    <span class="card-title">🏪 Markets Monitored (Last 24h)</span>
                     <span class="refresh-indicator">Live</span>
                 </div>
                 <div class="chart-container">
-                    <canvas id="daily-chart"></canvas>
+                    <canvas id="markets-chart"></canvas>
                 </div>
-                <div id="daily-chart-empty" class="chart-empty" style="display: none;">
-                    No execution data yet. Charts will populate when trades are executed.
+                <div id="markets-chart-empty" class="chart-empty" style="display: none;">
+                    No data yet. Chart will populate when bot starts monitoring markets.
                 </div>
+            </div>
+        </div>
+
+        <!-- Daily Executions Chart -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title">📈 Daily Executions (Last 30d)</span>
+                <span class="refresh-indicator">Live</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="daily-chart"></canvas>
+            </div>
+            <div id="daily-chart-empty" class="chart-empty" style="display: none;">
+                No execution data yet. Charts will populate when trades are executed.
             </div>
         </div>
 
@@ -1597,138 +1611,151 @@
         document.getElementById('near-miss-load-more').addEventListener('click', () => fetchNearMissAlerts(true));
 
         // Chart instances
-        let hourlyChart = null;
+        let priceUpdatesChart = null;
+        let marketsChart = null;
         let dailyChart = null;
 
         // Chart.js default configuration for dark theme
         Chart.defaults.color = '#8b949e';
         Chart.defaults.borderColor = '#30363d';
 
-        async function fetchHourlyChart() {
+        // Helper to format hour labels in PST
+        function formatHourLabel(h) {
+            const isoString = h.replace(' ', 'T') + ':00Z';
+            const date = new Date(isoString);
+            if (isNaN(date.getTime())) {
+                const parts = h.split(' ');
+                return parts[1] || h;
+            }
+            return date.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                hour12: true,
+                timeZone: 'America/Los_Angeles'
+            });
+        }
+
+        async function fetchHourlyCharts() {
             try {
                 const resp = await fetch('/api/charts/hourly?hours=24');
                 const data = await resp.json();
 
-                const canvas = document.getElementById('hourly-chart');
-                const emptyMsg = document.getElementById('hourly-chart-empty');
+                const labels = data.hours.map(formatHourLabel);
+
+                // Price Updates Chart
+                const priceCanvas = document.getElementById('price-updates-chart');
+                const priceEmpty = document.getElementById('price-updates-chart-empty');
 
                 if (data.count === 0) {
-                    canvas.style.display = 'none';
-                    emptyMsg.style.display = 'flex';
-                    return;
-                }
+                    priceCanvas.style.display = 'none';
+                    priceEmpty.style.display = 'flex';
+                } else {
+                    priceCanvas.style.display = 'block';
+                    priceEmpty.style.display = 'none';
 
-                canvas.style.display = 'block';
-                emptyMsg.style.display = 'none';
-
-                // Format hours for display in PST
-                const labels = data.hours.map(h => {
-                    // Parse UTC hour string (YYYY-MM-DD HH:00)
-                    // Convert "2025-12-23 19:00" to valid ISO format
-                    const isoString = h.replace(' ', 'T') + ':00Z';
-                    const date = new Date(isoString);
-                    if (isNaN(date.getTime())) {
-                        // Fallback: just show the hour part
-                        const parts = h.split(' ');
-                        return parts[1] || h;
-                    }
-                    return date.toLocaleTimeString('en-US', {
-                        hour: 'numeric',
-                        hour12: true,
-                        timeZone: 'America/Los_Angeles'
-                    });
-                });
-
-                const chartData = {
-                    labels: labels,
-                    datasets: [
-                        {
+                    const priceData = {
+                        labels: labels,
+                        datasets: [{
                             label: 'Price Updates',
                             data: data.price_updates,
                             borderColor: '#58a6ff',
-                            backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                            backgroundColor: 'rgba(88, 166, 255, 0.2)',
                             fill: true,
                             tension: 0.3,
-                            yAxisID: 'y',
-                        },
-                        {
+                            pointRadius: 2,
+                        }]
+                    };
+
+                    const priceConfig = {
+                        type: 'line',
+                        data: priceData,
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    backgroundColor: '#21262d',
+                                    borderColor: '#30363d',
+                                    borderWidth: 1,
+                                }
+                            },
+                            scales: {
+                                x: { grid: { display: false } },
+                                y: {
+                                    beginAtZero: true,
+                                    grid: { color: 'rgba(48, 54, 61, 0.5)' },
+                                    ticks: {
+                                        callback: (v) => v >= 1000 ? (v/1000).toFixed(0) + 'k' : v
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    if (priceUpdatesChart) {
+                        priceUpdatesChart.data = priceData;
+                        priceUpdatesChart.update('none');
+                    } else {
+                        priceUpdatesChart = new Chart(priceCanvas, priceConfig);
+                    }
+                }
+
+                // Markets Chart
+                const marketsCanvas = document.getElementById('markets-chart');
+                const marketsEmpty = document.getElementById('markets-chart-empty');
+
+                if (data.count === 0) {
+                    marketsCanvas.style.display = 'none';
+                    marketsEmpty.style.display = 'flex';
+                } else {
+                    marketsCanvas.style.display = 'block';
+                    marketsEmpty.style.display = 'none';
+
+                    const marketsData = {
+                        labels: labels,
+                        datasets: [{
                             label: 'Markets',
                             data: data.markets,
                             borderColor: '#3fb950',
-                            backgroundColor: 'transparent',
-                            borderDash: [5, 5],
+                            backgroundColor: 'rgba(63, 185, 80, 0.2)',
+                            fill: true,
                             tension: 0.3,
-                            yAxisID: 'y1',
-                        }
-                    ]
-                };
+                            pointRadius: 2,
+                        }]
+                    };
 
-                const config = {
-                    type: 'line',
-                    data: chartData,
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        interaction: {
-                            mode: 'index',
-                            intersect: false,
-                        },
-                        plugins: {
-                            legend: {
-                                position: 'top',
-                                labels: {
-                                    usePointStyle: true,
-                                    padding: 20,
+                    const marketsConfig = {
+                        type: 'line',
+                        data: marketsData,
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    backgroundColor: '#21262d',
+                                    borderColor: '#30363d',
+                                    borderWidth: 1,
                                 }
                             },
-                            tooltip: {
-                                backgroundColor: '#21262d',
-                                borderColor: '#30363d',
-                                borderWidth: 1,
+                            scales: {
+                                x: { grid: { display: false } },
+                                y: {
+                                    grid: { color: 'rgba(48, 54, 61, 0.5)' },
+                                }
                             }
-                        },
-                        scales: {
-                            x: {
-                                grid: {
-                                    display: false,
-                                }
-                            },
-                            y: {
-                                type: 'linear',
-                                display: true,
-                                position: 'left',
-                                title: {
-                                    display: true,
-                                    text: 'Price Updates'
-                                },
-                                grid: {
-                                    color: 'rgba(48, 54, 61, 0.5)',
-                                }
-                            },
-                            y1: {
-                                type: 'linear',
-                                display: true,
-                                position: 'right',
-                                title: {
-                                    display: true,
-                                    text: 'Markets'
-                                },
-                                grid: {
-                                    drawOnChartArea: false,
-                                },
-                            },
                         }
-                    },
-                };
+                    };
 
-                if (hourlyChart) {
-                    hourlyChart.data = chartData;
-                    hourlyChart.update('none');
-                } else {
-                    hourlyChart = new Chart(canvas, config);
+                    if (marketsChart) {
+                        marketsChart.data = marketsData;
+                        marketsChart.update('none');
+                    } else {
+                        marketsChart = new Chart(marketsCanvas, marketsConfig);
+                    }
                 }
             } catch (e) {
-                console.error('Hourly chart fetch error:', e);
+                console.error('Hourly charts fetch error:', e);
             }
         }
 
@@ -1841,7 +1868,7 @@
         fetchOrders();
         fetchPositions();
         fetchRedeemedHistory();
-        fetchHourlyChart();
+        fetchHourlyCharts();
         fetchDailyChart();
 
         // Refresh intervals
@@ -1854,7 +1881,7 @@
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
         setInterval(fetchPositions, 30000);  // Positions every 30s
         setInterval(() => fetchRedeemedHistory(false), 60000);  // Redeemed history every 60s
-        setInterval(fetchHourlyChart, 5000);  // Hourly chart with status updates
+        setInterval(fetchHourlyCharts, 5000);  // Hourly charts with status updates
         setInterval(fetchDailyChart, 60000);  // Daily chart every minute
 
         addLogLine('info', 'Live updates enabled');
