@@ -1280,41 +1280,117 @@
         }
 
         function renderClosedPositionsTable(positions) {
-            return `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Market</th>
-                            <th>Outcome</th>
-                            <th>Size</th>
-                            <th>Cost</th>
-                            <th>Value</th>
-                            <th>P&L</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${positions.map(p => {
-                            const pnlColor = p.realized_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
-                            const pnlSign = p.realized_pnl >= 0 ? '+' : '';
-                            const statusIcon = p.status === 'WON' ? '✓' : p.status === 'LOST' ? '✗' : '-';
-                            const statusColor = p.status === 'WON' ? 'var(--accent-green)' : p.status === 'LOST' ? 'var(--accent-red)' : 'var(--text-secondary)';
-                            return `
-                            <tr>
-                                <td>${formatDateTime(p.timestamp)}</td>
-                                <td>${p.market || '-'}</td>
-                                <td><span style="color: ${p.outcome === 'Yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${p.outcome || '-'}</span></td>
-                                <td>${p.size.toFixed(0)}</td>
-                                <td>$${p.cost_basis.toFixed(2)}</td>
-                                <td>$${p.realized_value.toFixed(2)}</td>
-                                <td style="color: ${pnlColor}; font-weight: 600;">${pnlSign}$${p.realized_pnl.toFixed(2)}</td>
-                                <td><span style="color: ${statusColor};">${statusIcon} ${p.status}${p.redeemed ? ' 💰' : ''}</span></td>
-                            </tr>
-                        `}).join('')}
-                    </tbody>
-                </table>
-            `;
+            // Group positions by market and approximate timestamp (within 1 hour)
+            const groups = {};
+            positions.forEach(p => {
+                // Create group key from market + date (hour precision for grouping trades)
+                const date = new Date(p.timestamp);
+                const hourKey = `${date.toISOString().slice(0, 13)}`; // YYYY-MM-DDTHH
+                const groupKey = `${p.market}|${hourKey}`;
+
+                if (!groups[groupKey]) {
+                    groups[groupKey] = {
+                        market: p.market,
+                        timestamp: p.timestamp,
+                        positions: [],
+                        totalCost: 0,
+                        totalValue: 0,
+                        totalPnl: 0
+                    };
+                }
+                groups[groupKey].positions.push(p);
+                groups[groupKey].totalCost += p.cost_basis;
+                groups[groupKey].totalValue += p.realized_value;
+                groups[groupKey].totalPnl += p.realized_pnl;
+                // Use earliest timestamp for the group
+                if (new Date(p.timestamp) < new Date(groups[groupKey].timestamp)) {
+                    groups[groupKey].timestamp = p.timestamp;
+                }
+            });
+
+            // Sort groups by timestamp descending
+            const sortedGroups = Object.values(groups).sort((a, b) =>
+                new Date(b.timestamp) - new Date(a.timestamp)
+            );
+
+            // Render grouped table
+            let html = `<table>
+                <thead>
+                    <tr>
+                        <th style="width: 30px;"></th>
+                        <th>Date</th>
+                        <th>Market</th>
+                        <th>Sides</th>
+                        <th>Total Cost</th>
+                        <th>Total Value</th>
+                        <th>Net P&L</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+            sortedGroups.forEach((group, idx) => {
+                const pnlColor = group.totalPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                const pnlSign = group.totalPnl >= 0 ? '+' : '';
+                const hasMultiple = group.positions.length > 1;
+                const sidesLabel = group.positions.map(p => p.outcome).join(' + ');
+                const groupId = `group-${idx}`;
+
+                // Summary row
+                html += `
+                    <tr class="group-header" style="cursor: ${hasMultiple ? 'pointer' : 'default'};" onclick="${hasMultiple ? `toggleGroup('${groupId}')` : ''}">
+                        <td style="text-align: center; color: var(--text-secondary);">
+                            ${hasMultiple ? `<span id="${groupId}-icon">▶</span>` : ''}
+                        </td>
+                        <td>${formatDateTime(group.timestamp)}</td>
+                        <td title="${group.market}">${(group.market || '-').slice(0, 40)}${(group.market || '').length > 40 ? '...' : ''}</td>
+                        <td>${sidesLabel}</td>
+                        <td>$${group.totalCost.toFixed(2)}</td>
+                        <td>$${group.totalValue.toFixed(2)}</td>
+                        <td style="color: ${pnlColor}; font-weight: 600;">${pnlSign}$${group.totalPnl.toFixed(2)}</td>
+                    </tr>`;
+
+                // Detail rows (hidden by default)
+                if (hasMultiple) {
+                    group.positions.forEach(p => {
+                        const itemPnlColor = p.realized_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                        const itemPnlSign = p.realized_pnl >= 0 ? '+' : '';
+                        const statusIcon = p.status === 'WON' ? '✓' : p.status === 'LOST' ? '✗' : '-';
+                        const statusColor = p.status === 'WON' ? 'var(--accent-green)' : p.status === 'LOST' ? 'var(--accent-red)' : 'var(--text-secondary)';
+
+                        html += `
+                        <tr class="${groupId}-detail" style="display: none; background: rgba(255,255,255,0.02);">
+                            <td></td>
+                            <td style="padding-left: 20px; color: var(--text-secondary);">└</td>
+                            <td>
+                                <span style="color: ${p.outcome === 'Yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">
+                                    ${p.outcome}
+                                </span>
+                                <span style="color: var(--text-secondary); margin-left: 8px;">${p.size.toFixed(0)} @ $${p.avg_price.toFixed(3)}</span>
+                            </td>
+                            <td><span style="color: ${statusColor};">${statusIcon} ${p.status}</span></td>
+                            <td>$${p.cost_basis.toFixed(2)}</td>
+                            <td>$${p.realized_value.toFixed(2)}</td>
+                            <td style="color: ${itemPnlColor};">${itemPnlSign}$${p.realized_pnl.toFixed(2)}</td>
+                        </tr>`;
+                    });
+                }
+            });
+
+            html += `</tbody></table>`;
+            return html;
+        }
+
+        function toggleGroup(groupId) {
+            const details = document.querySelectorAll(`.${groupId}-detail`);
+            const icon = document.getElementById(`${groupId}-icon`);
+            const isHidden = details[0]?.style.display === 'none';
+
+            details.forEach(row => {
+                row.style.display = isHidden ? 'table-row' : 'none';
+            });
+            if (icon) {
+                icon.textContent = isHidden ? '▼' : '▶';
+            }
         }
 
         // Event listeners for load more buttons
