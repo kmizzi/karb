@@ -1,13 +1,12 @@
 """Portfolio and balance tracking."""
 
-import json
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
-from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from karb.config import get_settings
+from karb.data.repositories import PortfolioRepository
 from karb.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -20,26 +19,21 @@ class BalanceSnapshot:
     polymarket_usdc: float
     total_usd: float
     positions_value: float = 0.0  # Value of open positions
-    kalshi_usd: float = 0.0  # Deprecated, kept for compatibility
 
 
 class PortfolioTracker:
-    """Track balances and portfolio value over time."""
+    """Track balances and portfolio value over time using SQLite."""
 
-    def __init__(self, data_path: Optional[Path] = None) -> None:
-        if data_path is None:
-            data_path = Path.home() / ".karb" / "portfolio.jsonl"
+    def __init__(self) -> None:
+        """Initialize portfolio tracker."""
+        pass  # No file path needed, uses database
 
-        self.data_path = data_path
-        self.data_path.parent.mkdir(parents=True, exist_ok=True)
-
-    async def get_current_balances(self) -> dict:
+    async def get_current_balances(self) -> dict[str, Any]:
         """Fetch current balances from Polymarket."""
         settings = get_settings()
-        balances = {
+        balances: dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
             "polymarket_usdc": 0.0,
-            "kalshi_usd": 0.0,  # Deprecated
             "total_usd": 0.0,
         }
 
@@ -57,7 +51,7 @@ class PortfolioTracker:
                 wallet = Web3.to_checksum_address(settings.wallet_address)
 
                 # Check both USDC contracts
-                total_usdc = 0
+                total_usdc = 0.0
                 for addr in [USDC_BRIDGED, USDC_NATIVE]:
                     usdc = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=USDC_ABI)
                     balance = usdc.functions.balanceOf(wallet).call()
@@ -70,70 +64,72 @@ class PortfolioTracker:
         balances["total_usd"] = balances["polymarket_usdc"]
         return balances
 
-    async def get_positions(self) -> dict:
+    async def get_positions(self) -> dict[str, Any]:
         """Get open positions on Polymarket."""
-        positions = {
+        positions: dict[str, Any] = {
             "polymarket": [],
         }
         # Polymarket positions would require additional API implementation
         return positions
 
     def record_snapshot(self, snapshot: BalanceSnapshot) -> None:
-        """Record a balance snapshot."""
-        with open(self.data_path, "a") as f:
-            data = {
-                "timestamp": snapshot.timestamp,
-                "polymarket_usdc": snapshot.polymarket_usdc,
-                "kalshi_usd": snapshot.kalshi_usd,
-                "total_usd": snapshot.total_usd,
-                "positions_value": snapshot.positions_value,
-            }
-            f.write(json.dumps(data) + "\n")
+        """Record a balance snapshot (non-blocking).
 
-    def get_snapshots(self, limit: int = 100) -> list[BalanceSnapshot]:
-        """Get recent balance snapshots."""
-        if not self.data_path.exists():
-            return []
+        This schedules an async database write without blocking.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._record_snapshot_async(snapshot))
+        except RuntimeError:
+            log.debug("No event loop, skipping database snapshot")
 
-        snapshots = []
-        with open(self.data_path) as f:
-            for line in f:
-                try:
-                    data = json.loads(line.strip())
-                    snapshots.append(BalanceSnapshot(**data))
-                except (json.JSONDecodeError, TypeError):
-                    continue
+    async def _record_snapshot_async(self, snapshot: BalanceSnapshot) -> None:
+        """Async implementation of snapshot recording."""
+        try:
+            await PortfolioRepository.insert(
+                timestamp=snapshot.timestamp,
+                polymarket_usdc=snapshot.polymarket_usdc,
+                total_usd=snapshot.total_usd,
+                positions_value=snapshot.positions_value,
+            )
+        except Exception as e:
+            log.debug("Failed to record snapshot to database", error=str(e))
 
-        return sorted(snapshots, key=lambda s: s.timestamp, reverse=True)[:limit]
+    async def record_snapshot_async(self, snapshot: BalanceSnapshot) -> None:
+        """Record a balance snapshot asynchronously."""
+        await self._record_snapshot_async(snapshot)
 
-    def get_profit_loss(self, since: Optional[datetime] = None) -> dict:
+    async def get_snapshots(self, limit: int = 100) -> list[BalanceSnapshot]:
+        """Get recent balance snapshots from database."""
+        rows = await PortfolioRepository.get_recent(limit=limit)
+        return [
+            BalanceSnapshot(
+                timestamp=row.get("timestamp", ""),
+                polymarket_usdc=row.get("polymarket_usdc", 0.0),
+                total_usd=row.get("total_usd", 0.0),
+                positions_value=row.get("positions_value", 0.0),
+            )
+            for row in rows
+        ]
+
+    async def get_profit_loss(self, since: Optional[datetime] = None) -> dict[str, Any]:
         """Calculate profit/loss over a period."""
-        snapshots = self.get_snapshots(limit=1000)
+        since_str = since.isoformat() if since else None
+        result = await PortfolioRepository.get_profit_loss(since_str or "1970-01-01")
 
-        if not snapshots:
-            return {"error": "No balance history"}
-
-        if since:
-            snapshots = [
-                s for s in snapshots
-                if datetime.fromisoformat(s.timestamp) >= since
-            ]
-
-        if len(snapshots) < 2:
+        if not result or not result.get("start_balance"):
             return {"error": "Not enough data points"}
 
-        # Most recent and oldest in period
-        current = snapshots[0]
-        starting = snapshots[-1]
-
-        pnl = current.total_usd - starting.total_usd
-        pnl_pct = (pnl / starting.total_usd * 100) if starting.total_usd > 0 else 0
+        start_balance = result.get("start_balance", 0)
+        end_balance = result.get("end_balance", 0)
+        pnl = result.get("profit_loss", 0)
+        pnl_pct = (pnl / start_balance * 100) if start_balance > 0 else 0
 
         return {
-            "starting_balance": starting.total_usd,
-            "current_balance": current.total_usd,
+            "starting_balance": start_balance,
+            "current_balance": end_balance,
             "pnl_usd": pnl,
             "pnl_pct": pnl_pct,
-            "period_start": starting.timestamp,
-            "period_end": current.timestamp,
+            "period_start": result.get("start_time"),
+            "period_end": result.get("end_time"),
         }

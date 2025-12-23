@@ -1,12 +1,11 @@
 """Trade logging and history."""
 
-import json
+import asyncio
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from decimal import Decimal
-from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
+from karb.data.repositories import TradeRepository
 from karb.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -31,19 +30,24 @@ class Trade:
 
 
 class TradeLog:
-    """Persistent trade logging."""
+    """Trade logging using SQLite database."""
 
-    def __init__(self, log_path: Optional[Path] = None) -> None:
-        if log_path is None:
-            log_path = Path.home() / ".karb" / "trades.jsonl"
-
-        self.log_path = log_path
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self) -> None:
+        """Initialize trade log."""
+        pass  # No file path needed, uses database
 
     def log_trade(self, trade: Trade) -> None:
-        """Append a trade to the log."""
-        with open(self.log_path, "a") as f:
-            f.write(json.dumps(asdict(trade)) + "\n")
+        """Log a trade to the database (non-blocking).
+
+        This schedules an async database write without blocking.
+        """
+        # Schedule async database write
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._log_trade_async(trade))
+        except RuntimeError:
+            # No running loop, use sync fallback (shouldn't happen in normal operation)
+            log.debug("No event loop, skipping database trade log")
 
         log.info(
             "Trade logged",
@@ -55,87 +59,62 @@ class TradeLog:
             size=f"${trade.size:.2f}",
         )
 
-    def get_trades(
+    async def _log_trade_async(self, trade: Trade) -> None:
+        """Async implementation of trade logging."""
+        try:
+            await TradeRepository.insert(
+                timestamp=trade.timestamp,
+                platform=trade.platform,
+                market_id=trade.market_id,
+                market_name=trade.market_name,
+                side=trade.side,
+                outcome=trade.outcome,
+                price=trade.price,
+                size=trade.size,
+                cost=trade.cost,
+                order_id=trade.order_id,
+                strategy=trade.strategy,
+                profit_expected=trade.profit_expected,
+                notes=trade.notes,
+            )
+        except Exception as e:
+            log.debug("Failed to log trade to database", error=str(e))
+
+    async def log_trade_async(self, trade: Trade) -> None:
+        """Log a trade to the database asynchronously."""
+        await self._log_trade_async(trade)
+        log.info(
+            "Trade logged",
+            platform=trade.platform,
+            market=trade.market_name[:30],
+            side=trade.side,
+            outcome=trade.outcome,
+            price=f"${trade.price:.3f}",
+            size=f"${trade.size:.2f}",
+        )
+
+    async def get_trades(
         self,
         limit: int = 100,
         platform: Optional[str] = None,
         since: Optional[datetime] = None,
     ) -> list[Trade]:
-        """Get recent trades."""
-        if not self.log_path.exists():
-            return []
+        """Get recent trades from the database."""
+        since_str = since.isoformat() if since else None
+        rows = await TradeRepository.get_recent(
+            limit=limit,
+            platform=platform,
+            since=since_str,
+        )
+        return [Trade(**row) for row in rows]
 
-        trades = []
-        with open(self.log_path) as f:
-            for line in f:
-                try:
-                    data = json.loads(line.strip())
-                    trade = Trade(**data)
-
-                    if platform and trade.platform != platform:
-                        continue
-
-                    if since:
-                        trade_time = datetime.fromisoformat(trade.timestamp)
-                        if trade_time < since:
-                            continue
-
-                    trades.append(trade)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-
-        # Return most recent first
-        return sorted(trades, key=lambda t: t.timestamp, reverse=True)[:limit]
-
-    def get_daily_summary(self, date: Optional[datetime] = None) -> dict:
+    async def get_daily_summary(self, date: Optional[datetime] = None) -> dict[str, Any]:
         """Get summary for a specific day."""
         if date is None:
             date = datetime.now()
+        date_str = date.strftime("%Y-%m-%d")
+        return await TradeRepository.get_daily_summary(date_str)
 
-        day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
-        day_end = day_start.replace(hour=23, minute=59, second=59)
-
-        trades = self.get_trades(limit=1000, since=day_start)
-        trades = [t for t in trades if datetime.fromisoformat(t.timestamp) <= day_end]
-
-        total_cost = sum(t.cost for t in trades)
-        total_expected_profit = sum(t.profit_expected or 0 for t in trades)
-
-        by_platform = {}
-        for t in trades:
-            if t.platform not in by_platform:
-                by_platform[t.platform] = {"count": 0, "cost": 0.0}
-            by_platform[t.platform]["count"] += 1
-            by_platform[t.platform]["cost"] += t.cost
-
-        return {
-            "date": day_start.strftime("%Y-%m-%d"),
-            "trade_count": len(trades),
-            "total_cost": total_cost,
-            "expected_profit": total_expected_profit,
-            "by_platform": by_platform,
-        }
-
-    def get_all_time_summary(self) -> dict:
+    async def get_all_time_summary(self) -> dict[str, Any]:
         """Get all-time trading summary."""
-        trades = self.get_trades(limit=10000)
-
-        if not trades:
-            return {
-                "trade_count": 0,
-                "total_cost": 0.0,
-                "expected_profit": 0.0,
-                "first_trade": None,
-                "last_trade": None,
-            }
-
-        total_cost = sum(t.cost for t in trades)
-        total_expected_profit = sum(t.profit_expected or 0 for t in trades)
-
-        return {
-            "trade_count": len(trades),
-            "total_cost": total_cost,
-            "expected_profit": total_expected_profit,
-            "first_trade": trades[-1].timestamp if trades else None,
-            "last_trade": trades[0].timestamp if trades else None,
-        }
+        return await TradeRepository.get_all_time_summary()

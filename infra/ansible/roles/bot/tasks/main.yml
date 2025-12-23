@@ -92,6 +92,19 @@
     virtualenv: /opt/karb/venv
   notify: Restart karb
 
+- name: Check if database exists
+  stat:
+    path: /home/karb/.karb/karb.db
+  register: db_exists
+
+- name: Run database migration
+  command: /opt/karb/venv/bin/python /opt/karb/scripts/migrate_to_sqlite.py
+  become: yes
+  become_user: karb
+  when: not db_exists.stat.exists
+  register: migration_result
+  changed_when: migration_result.rc == 0
+
 - name: Create .env file from template
   template:
     src: env.j2

@@ -1,21 +1,24 @@
 """FastAPI dashboard application."""
 
-import json
 import secrets
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from karb.config import get_settings
+from karb.data.database import init_async_db
+from karb.data.repositories import (
+    AlertRepository,
+    ExecutionRepository,
+    StatsRepository,
+    TradeRepository,
+)
 from karb.tracking.portfolio import PortfolioTracker
-from karb.tracking.trades import TradeLog
 from karb.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -23,11 +26,6 @@ log = get_logger(__name__)
 # Template directory
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 TEMPLATE_DIR.mkdir(exist_ok=True)
-
-# Shared state files from scanner
-STATS_FILE = Path.home() / ".karb" / "scanner_stats.json"
-ALERTS_FILE = Path.home() / ".karb" / "scanner_alerts.json"
-ORDERS_FILE = Path.home() / ".karb" / "orders.json"
 
 security = HTTPBasic(auto_error=False)
 
@@ -79,6 +77,12 @@ def create_app() -> FastAPI:
 
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
+    @app.on_event("startup")
+    async def startup():
+        """Initialize database on startup."""
+        await init_async_db()
+        log.info("Dashboard database initialized")
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(
         request: Request,
@@ -95,20 +99,16 @@ def create_app() -> FastAPI:
         """Get current bot status."""
         settings = get_settings()
 
-        # Read scanner stats from shared file
-        scanner_stats = {
-            "markets": 0,
-            "price_updates": 0,
-            "arbitrage_alerts": 0,
-            "ws_connected": False,
-            "last_update": None,
-        }
-        try:
-            if STATS_FILE.exists():
-                with open(STATS_FILE) as f:
-                    scanner_stats = json.load(f)
-        except Exception:
-            pass
+        # Read scanner stats from database
+        scanner_stats = await StatsRepository.get()
+        if not scanner_stats:
+            scanner_stats = {
+                "markets": 0,
+                "price_updates": 0,
+                "arbitrage_alerts": 0,
+                "ws_connected": False,
+                "last_update": None,
+            }
 
         return {
             "bot": {
@@ -137,20 +137,18 @@ def create_app() -> FastAPI:
         limit: int = 20,
         username: str = Depends(verify_credentials),
     ):
-        """Get recent trades."""
-        trade_log = TradeLog()
-        trades = trade_log.get_trades(limit=limit)
+        """Get recent trades from database."""
+        trades = await TradeRepository.get_recent(limit=limit)
         return {
             "trades": [
                 {
-                    "timestamp": t.timestamp,
-                    "platform": t.platform,
-                    "market": t.market_question[:50] + "..." if len(t.market_question) > 50 else t.market_question,
-                    "side": t.side,
-                    "price": float(t.price),
-                    "size": float(t.size),
-                    "cost": float(t.cost),
-                    "status": t.status,
+                    "timestamp": t.get("timestamp", ""),
+                    "platform": t.get("platform", ""),
+                    "market": (t.get("market_name", "") or "")[:50],
+                    "side": t.get("side", ""),
+                    "price": float(t.get("price", 0)),
+                    "size": float(t.get("size", 0)),
+                    "cost": float(t.get("cost", 0)),
                 }
                 for t in trades
             ],
@@ -160,12 +158,13 @@ def create_app() -> FastAPI:
     @app.get("/api/pnl")
     async def get_pnl(username: str = Depends(verify_credentials)):
         """Get profit/loss summary."""
-        trade_log = TradeLog()
-        tracker = PortfolioTracker()
+        daily = await TradeRepository.get_daily_summary(
+            datetime.now().strftime("%Y-%m-%d")
+        )
+        all_time = await TradeRepository.get_all_time_summary()
 
-        daily = trade_log.get_daily_summary()
-        all_time = trade_log.get_all_time_summary()
-        pnl = tracker.get_profit_loss()
+        tracker = PortfolioTracker()
+        pnl = await tracker.get_profit_loss()
 
         return {
             "daily": daily,
@@ -178,41 +177,57 @@ def create_app() -> FastAPI:
         limit: int = 10,
         username: str = Depends(verify_credentials),
     ):
-        """Get recent arbitrage alerts."""
-        alerts = []
-        try:
-            if ALERTS_FILE.exists():
-                with open(ALERTS_FILE) as f:
-                    alerts = json.load(f)
-        except Exception:
-            pass
-
-        return {"alerts": alerts[-limit:], "count": len(alerts)}
+        """Get recent arbitrage alerts from database."""
+        alerts = await AlertRepository.get_recent(limit=limit)
+        return {"alerts": alerts, "count": len(alerts)}
 
     @app.get("/api/orders")
     async def get_orders(username: str = Depends(verify_credentials)):
-        """Get current order status and recent executions."""
-        orders_data = {
-            "active_orders": [],
-            "recent_executions": [],
+        """Get current order status and recent executions from database."""
+        executions = await ExecutionRepository.get_recent(limit=20)
+        stats = await ExecutionRepository.get_stats()
+
+        # Format executions for dashboard compatibility
+        formatted_executions = [
+            {
+                "timestamp": e.get("timestamp", ""),
+                "market": e.get("market", ""),
+                "status": e.get("status", ""),
+                "yes_order": {
+                    "order_id": e.get("yes_order_id"),
+                    "status": e.get("yes_status", ""),
+                    "price": float(e.get("yes_price", 0) or 0),
+                    "size": float(e.get("yes_size", 0) or 0),
+                    "filled_size": float(e.get("yes_filled_size", 0) or 0),
+                },
+                "no_order": {
+                    "order_id": e.get("no_order_id"),
+                    "status": e.get("no_status", ""),
+                    "price": float(e.get("no_price", 0) or 0),
+                    "size": float(e.get("no_size", 0) or 0),
+                    "filled_size": float(e.get("no_filled_size", 0) or 0),
+                },
+                "total_cost": float(e.get("total_cost", 0) or 0),
+                "expected_profit": float(e.get("expected_profit", 0) or 0),
+            }
+            for e in executions
+        ]
+
+        return {
+            "active_orders": [],  # Active orders are still in-memory
+            "recent_executions": formatted_executions,
             "stats": {
-                "total_attempts": 0,
-                "successful": 0,
-                "partial": 0,
-                "failed": 0,
-                "cancelled": 0,
+                "total_attempts": stats.get("total_attempts", 0),
+                "successful": stats.get("successful", 0),
+                "partial": stats.get("partial", 0),
+                "failed": stats.get("failed", 0),
+                "cancelled": stats.get("cancelled", 0),
+                "total_volume": stats.get("total_volume", 0),
+                "total_profit": stats.get("total_profit", 0),
+                "success_rate": stats.get("success_rate", 0),
             },
-            "updated_at": None,
+            "updated_at": datetime.now().isoformat(),
         }
-
-        try:
-            if ORDERS_FILE.exists():
-                with open(ORDERS_FILE) as f:
-                    orders_data = json.load(f)
-        except Exception:
-            pass
-
-        return orders_data
 
     return app
 
@@ -220,8 +235,6 @@ def create_app() -> FastAPI:
 def run_dashboard(host: str = "0.0.0.0", port: int = 80):
     """Run the dashboard server."""
     import uvicorn
-
-    settings = get_settings()
 
     log.info("Starting dashboard", host=host, port=port)
 

@@ -1,11 +1,9 @@
 """Real-time market scanner using WebSocket streaming."""
 
 import asyncio
-import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from pathlib import Path
 from typing import Callable, Optional
 
 from karb.api.gamma import GammaClient
@@ -16,14 +14,12 @@ from karb.api.websocket import (
     WebSocketClient,
 )
 from karb.config import get_settings
+from karb.data.database import init_async_db
+from karb.data.repositories import AlertRepository, StatsRepository
 from karb.notifications.slack import get_notifier
 from karb.utils.logging import get_logger
 
 log = get_logger(__name__)
-
-# Shared state files for dashboard
-STATS_FILE = Path.home() / ".karb" / "scanner_stats.json"
-ALERTS_FILE = Path.home() / ".karb" / "scanner_alerts.json"
 
 # Maximum assets per WebSocket connection
 MAX_ASSETS_PER_WS = 500
@@ -418,6 +414,9 @@ class RealtimeScanner:
         """Run the real-time scanner."""
         self._running = True
 
+        # Initialize database
+        await init_async_db()
+
         log.info(
             "Starting real-time scanner",
             num_connections=self.num_connections,
@@ -531,35 +530,43 @@ class RealtimeScanner:
                     spread=best_spread,
                 )
 
-            # Write stats to file for dashboard
-            self._write_stats_file(stats)
+            # Write stats to database for dashboard (non-blocking)
+            asyncio.create_task(self._write_stats_async(stats))
 
-    def _write_stats_file(self, stats: dict) -> None:
-        """Write stats to shared file for dashboard."""
+    async def _write_stats_async(self, stats: dict) -> None:
+        """Write stats to database asynchronously."""
         try:
-            STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            stats["last_update"] = asyncio.get_event_loop().time()
-            with open(STATS_FILE, "w") as f:
-                json.dump(stats, f)
+            await StatsRepository.update(
+                markets=stats.get("markets", 0),
+                price_updates=stats.get("price_updates", 0),
+                arbitrage_alerts=stats.get("arbitrage_alerts", 0),
+                ws_connected=stats.get("ws_connected", False),
+                ws_connections=stats.get("ws_connections", ""),
+                subscribed_tokens=stats.get("subscribed_tokens", 0),
+            )
         except Exception as e:
-            log.debug("Failed to write stats file", error=str(e))
+            log.debug("Failed to write stats to database", error=str(e))
 
     def _save_alert(
         self,
         alert: ArbitrageAlert,
-        first_seen: datetime = None,
-        duration_secs: float = None,
+        first_seen: Optional[datetime] = None,
+        duration_secs: Optional[float] = None,
     ) -> None:
-        """Save arbitrage alert to file for dashboard."""
+        """Save arbitrage alert to database (non-blocking)."""
+        # Schedule async save as a task
+        asyncio.create_task(
+            self._save_alert_async(alert, first_seen, duration_secs)
+        )
+
+    async def _save_alert_async(
+        self,
+        alert: ArbitrageAlert,
+        first_seen: Optional[datetime] = None,
+        duration_secs: Optional[float] = None,
+    ) -> None:
+        """Save arbitrage alert to database asynchronously."""
         try:
-            ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-            # Load existing alerts
-            alerts = []
-            if ALERTS_FILE.exists():
-                with open(ALERTS_FILE) as f:
-                    alerts = json.load(f)
-
             # Calculate days until resolution
             days_until = None
             if alert.market.end_date:
@@ -577,28 +584,21 @@ class RealtimeScanner:
                 else:
                     resolution_date = alert.market.end_date.isoformat()
 
-            # Add new alert
-            alerts.append({
-                "market": alert.market.question[:60],
-                "yes_ask": float(alert.yes_ask),
-                "no_ask": float(alert.no_ask),
-                "combined": float(alert.combined_cost),
-                "profit": float(alert.profit_pct),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "platform": "polymarket",
-                "days_until_resolution": days_until,
-                "resolution_date": resolution_date,
-                "first_seen": first_seen.isoformat() if first_seen else None,
-                "duration_secs": round(duration_secs, 1) if duration_secs is not None else None,
-            })
-
-            # Keep only last 50 alerts
-            alerts = alerts[-50:]
-
-            with open(ALERTS_FILE, "w") as f:
-                json.dump(alerts, f)
+            await AlertRepository.insert(
+                market=alert.market.question[:60],
+                yes_ask=float(alert.yes_ask),
+                no_ask=float(alert.no_ask),
+                combined=float(alert.combined_cost),
+                profit=float(alert.profit_pct),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                platform="polymarket",
+                days_until_resolution=days_until,
+                resolution_date=resolution_date,
+                first_seen=first_seen.isoformat() if first_seen else None,
+                duration_secs=round(duration_secs, 1) if duration_secs is not None else None,
+            )
         except Exception as e:
-            log.debug("Failed to save alert", error=str(e))
+            log.debug("Failed to save alert to database", error=str(e))
 
     def stop(self) -> None:
         """Stop the scanner."""

@@ -5,7 +5,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
@@ -13,13 +13,14 @@ from typing import Any, Optional
 
 from karb.api.models import ArbitrageOpportunity
 from karb.config import get_settings
+from karb.data.repositories import ExecutionRepository
 from karb.executor.async_clob import AsyncClobClient, create_async_clob_client
 
 # Order monitoring settings
 ORDER_FILL_TIMEOUT_SECONDS = 10  # Max time to wait for order fills
 ORDER_CHECK_INTERVAL_SECONDS = 0.5  # How often to check order status
 
-# Shared state file for dashboard
+# Shared state file for dashboard (kept for backward compatibility during transition)
 ORDERS_FILE = Path.home() / ".karb" / "orders.json"
 from karb.executor.signer import OrderSide, OrderSigner
 from karb.notifications.slack import get_notifier
@@ -617,6 +618,9 @@ class OrderExecutor:
 
         self._execution_history.append(result)
 
+        # Save to database (non-blocking)
+        asyncio.create_task(self._save_execution_to_db(result))
+
         # Log trades
         self._log_trades(result)
 
@@ -636,6 +640,29 @@ class OrderExecutor:
             pass
 
         return result
+
+    async def _save_execution_to_db(self, result: "ExecutionResult") -> None:
+        """Save execution record to database asynchronously."""
+        try:
+            await ExecutionRepository.insert(
+                timestamp=result.timestamp.replace(tzinfo=timezone.utc).isoformat(),
+                market=result.opportunity.market.question[:60],
+                status=result.status.value,
+                yes_order_id=result.yes_order.order_id,
+                yes_status=result.yes_order.status.value,
+                yes_price=float(result.yes_order.price),
+                yes_size=float(result.yes_order.size),
+                yes_filled_size=float(result.yes_order.filled_size),
+                no_order_id=result.no_order.order_id,
+                no_status=result.no_order.status.value,
+                no_price=float(result.no_order.price),
+                no_size=float(result.no_order.size),
+                no_filled_size=float(result.no_order.filled_size),
+                total_cost=float(result.total_cost),
+                expected_profit=float(result.expected_profit),
+            )
+        except Exception as e:
+            log.debug("Failed to save execution to database", error=str(e))
 
     def _log_trades(self, result: ExecutionResult) -> None:
         """Log trades to persistent storage."""
@@ -928,6 +955,9 @@ class OrderExecutor:
         )
 
         self._execution_history.append(result)
+
+        # Save to database (non-blocking)
+        asyncio.create_task(self._save_execution_to_db(result))
 
         # Log trades
         self._log_trades(result)
