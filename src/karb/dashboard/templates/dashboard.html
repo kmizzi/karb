@@ -1169,6 +1169,8 @@
                             <tr>
                                 <th>Time</th>
                                 <th>Market</th>
+                                <th>Arb %</th>
+                                <th>Liquidity</th>
                                 <th>YES Order</th>
                                 <th>NO Order</th>
                                 <th>Status</th>
@@ -1198,12 +1200,19 @@
                                     }
                                 }
 
+                                // Format arb profit %
+                                const arbPct = e.profit_pct ? `+${(e.profit_pct * 100).toFixed(2)}%` : '-';
+                                // Format liquidity (sum of both sides available)
+                                const liquidity = e.market_liquidity ? `$${e.market_liquidity.toLocaleString(undefined, {maximumFractionDigits: 0})}` : '-';
+
                                 const yesError = e.yes_order.error ? `<div style="color: var(--accent-red); font-size: 10px; max-width: 200px; word-wrap: break-word;">${e.yes_order.error}</div>` : '';
                                 const noError = e.no_order.error ? `<div style="color: var(--accent-red); font-size: 10px; max-width: 200px; word-wrap: break-word;">${e.no_order.error}</div>` : '';
                                 return `
                                 <tr>
                                     <td>${formatDateTime(e.timestamp)}</td>
                                     <td>${e.market}</td>
+                                    <td style="color: var(--accent-green); font-weight: 600;">${arbPct}</td>
+                                    <td style="color: var(--text-secondary);">${liquidity}</td>
                                     <td>
                                         <span style="color: ${e.yes_order.status === 'filled' ? 'var(--accent-green)' : e.yes_order.status === 'submitted' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
                                             ${e.yes_order.status}

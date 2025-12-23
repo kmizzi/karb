@@ -406,6 +406,8 @@ def create_app() -> FastAPI:
                 },
                 "total_cost": float(e.get("total_cost", 0) or 0),
                 "expected_profit": float(e.get("expected_profit", 0) or 0),
+                "profit_pct": float(e.get("profit_pct", 0) or 0),
+                "market_liquidity": float(e.get("market_liquidity", 0) or 0),
             }
             for e in executions
         ]

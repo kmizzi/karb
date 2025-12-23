@@ -751,9 +751,13 @@ class OrderExecutor:
     async def _save_execution_to_db(self, result: "ExecutionResult") -> None:
         """Save execution record to database asynchronously."""
         try:
+            opp = result.opportunity
+            # Calculate total market liquidity (sum of both sides)
+            market_liquidity = float(opp.yes_size_available) + float(opp.no_size_available)
+
             await ExecutionRepository.insert(
                 timestamp=result.timestamp.replace(tzinfo=timezone.utc).isoformat(),
-                market=result.opportunity.market.question[:60],
+                market=opp.market.question[:60],
                 status=result.status.value,
                 yes_order_id=result.yes_order.order_id,
                 yes_status=result.yes_order.status.value,
@@ -769,6 +773,8 @@ class OrderExecutor:
                 no_error=result.no_order.error,
                 total_cost=float(result.total_cost),
                 expected_profit=float(result.expected_profit),
+                profit_pct=float(opp.profit_pct),
+                market_liquidity=market_liquidity,
             )
         except Exception as e:
             log.debug("Failed to save execution to database", error=str(e))
