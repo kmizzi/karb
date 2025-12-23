@@ -229,20 +229,28 @@ class RealtimeScanner:
     def _on_price_change(self, change: PriceChange) -> None:
         """Handle real-time price change."""
         self._price_updates += 1
-        # For price changes, get size from cached orderbook
         best_ask_size = None
-        # Search for orderbook across all WebSocket clients
-        orderbook = None
-        for client in self.ws_clients:
-            orderbook = client.get_orderbook(change.asset_id)
-            if orderbook:
-                break
-        if orderbook and orderbook.asks:
-            best_ask_price = min(a.price for a in orderbook.asks)
-            for a in orderbook.asks:
-                if a.price == best_ask_price:
-                    best_ask_size = a.size
+
+        # If this is a SELL-side change at the best ask, use the size directly
+        if (
+            change.side == "SELL"
+            and change.best_ask is not None
+            and change.price == change.best_ask
+        ):
+            best_ask_size = change.size
+        else:
+            # Fall back to cached orderbook for size
+            orderbook = None
+            for client in self.ws_clients:
+                orderbook = client.get_orderbook(change.asset_id)
+                if orderbook:
                     break
+            if orderbook and orderbook.asks:
+                best_ask_price = min(a.price for a in orderbook.asks)
+                for a in orderbook.asks:
+                    if a.price == best_ask_price:
+                        best_ask_size = a.size
+                        break
 
         self._update_prices(
             change.asset_id,
