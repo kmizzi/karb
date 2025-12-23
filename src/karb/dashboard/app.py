@@ -181,7 +181,16 @@ def create_app() -> FastAPI:
                     "end_date": p.get("endDate", ""),
                 })
 
-            return {"positions": formatted, "count": len(formatted)}
+            # Split into open and closed positions
+            open_positions = [p for p in formatted if p["status"] == "OPEN"]
+            closed_positions = [p for p in formatted if p["status"] != "OPEN"]
+
+            return {
+                "open": open_positions,
+                "closed": closed_positions,
+                "open_count": len(open_positions),
+                "closed_count": len(closed_positions),
+            }
         except Exception as e:
             log.error("Failed to get positions", error=str(e))
             return {"positions": [], "error": str(e)}
