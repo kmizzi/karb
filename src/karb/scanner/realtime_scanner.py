@@ -138,6 +138,9 @@ class RealtimeScanner:
         self._market_prices: dict[str, MarketPrices] = {}  # market_id -> MarketPrices
         self._running = False
 
+        # Track active opportunities for duration calculation
+        self._active_opportunities: dict[str, datetime] = {}  # market_id -> first_seen
+
         # Stats
         self._price_updates = 0
         self._arbitrage_alerts = 0
@@ -307,6 +310,16 @@ class RealtimeScanner:
                     self._best_near_miss_market = prices.market.question[:40]
 
         if not prices.has_arbitrage:
+            # If this market had an active opportunity that just ended, log it
+            market_id = prices.market.id
+            if market_id in self._active_opportunities:
+                first_seen = self._active_opportunities.pop(market_id)
+                duration_secs = (datetime.now(timezone.utc) - first_seen).total_seconds()
+                log.info(
+                    "Opportunity closed",
+                    market=prices.market.question[:40],
+                    duration_secs=f"{duration_secs:.1f}s",
+                )
             return
 
         # Check resolution date - skip markets that resolve too far in the future
@@ -336,6 +349,14 @@ class RealtimeScanner:
 
         self._arbitrage_alerts += 1
 
+        # Track when opportunity first appeared
+        market_id = prices.market.id
+        now = datetime.now(timezone.utc)
+        if market_id not in self._active_opportunities:
+            self._active_opportunities[market_id] = now
+        first_seen = self._active_opportunities[market_id]
+        duration_secs = (now - first_seen).total_seconds()
+
         alert = ArbitrageAlert(
             market=prices.market,
             yes_ask=prices.yes_best_ask or Decimal("0"),
@@ -364,6 +385,7 @@ class RealtimeScanner:
             combined=f"${float(alert.combined_cost):.4f}",
             profit=f"{float(alert.profit_pct) * 100:.2f}%",
             resolves_in=f"{days_until_resolution}d" if days_until_resolution is not None else "unknown",
+            open_for=f"{duration_secs:.1f}s",
         )
 
         # Trigger callback FIRST - execution is time-critical
@@ -377,7 +399,7 @@ class RealtimeScanner:
 
         # Save alert to file for dashboard (non-blocking, runs in background)
         loop = asyncio.get_event_loop()
-        loop.run_in_executor(None, self._save_alert, alert)
+        loop.run_in_executor(None, self._save_alert, alert, first_seen, duration_secs)
 
         # Send Slack notification (already async)
         try:
@@ -522,7 +544,12 @@ class RealtimeScanner:
         except Exception as e:
             log.debug("Failed to write stats file", error=str(e))
 
-    def _save_alert(self, alert: ArbitrageAlert) -> None:
+    def _save_alert(
+        self,
+        alert: ArbitrageAlert,
+        first_seen: datetime = None,
+        duration_secs: float = None,
+    ) -> None:
         """Save arbitrage alert to file for dashboard."""
         try:
             ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -542,6 +569,14 @@ class RealtimeScanner:
                     end_date = end_date.replace(tzinfo=timezone.utc)
                 days_until = (end_date - now).days
 
+            # Include resolution date as ISO string for proper formatting
+            resolution_date = None
+            if alert.market.end_date:
+                if alert.market.end_date.tzinfo is None:
+                    resolution_date = alert.market.end_date.replace(tzinfo=timezone.utc).isoformat()
+                else:
+                    resolution_date = alert.market.end_date.isoformat()
+
             # Add new alert
             alerts.append({
                 "market": alert.market.question[:60],
@@ -552,6 +587,9 @@ class RealtimeScanner:
                 "timestamp": datetime.now().isoformat(),
                 "platform": "polymarket",
                 "days_until_resolution": days_until,
+                "resolution_date": resolution_date,
+                "first_seen": first_seen.isoformat() if first_seen else None,
+                "duration_secs": round(duration_secs, 1) if duration_secs is not None else None,
             })
 
             # Keep only last 50 alerts
