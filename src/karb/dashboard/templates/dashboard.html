@@ -999,7 +999,7 @@
                         <div class="empty-state">Monitoring for opportunities...</div>
                     `;
                 } else {
-                    document.getElementById('alerts-container').innerHTML = allAlerts.slice().reverse().map(alert => {
+                    document.getElementById('alerts-container').innerHTML = allAlerts.map(alert => {
                         const platform = (alert.platform || 'polymarket').toUpperCase();
 
                         // Format resolution date in PST
@@ -1102,7 +1102,7 @@
                         <div class="empty-state">No illiquid opportunities detected yet</div>
                     `;
                 } else {
-                    document.getElementById('near-miss-container').innerHTML = allNearMissAlerts.slice().reverse().map(alert => {
+                    document.getElementById('near-miss-container').innerHTML = allNearMissAlerts.map(alert => {
                         // Format timestamp in PST
                         let alertTime = '';
                         if (alert.timestamp) {
