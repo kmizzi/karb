@@ -483,10 +483,20 @@
             to { transform: rotate(360deg); }
         }
 
+        @media (max-width: 1200px) {
+            .grid[style*="repeat(3"] { grid-template-columns: 1fr !important; }
+        }
+
         @media (max-width: 768px) {
             .grid { grid-template-columns: 1fr; }
             .stat-value { font-size: 24px; }
             .terminal-body { height: 200px; }
+        }
+
+        /* Compact tables for position cards */
+        .compact-table th, .compact-table td {
+            padding: 8px 4px;
+            font-size: 11px;
         }
     </style>
 </head>
@@ -594,25 +604,42 @@
             </div>
         </div>
 
-        <!-- Open Positions Section -->
-        <div class="card" style="margin-bottom: 24px;">
-            <div class="card-header">
-                <span class="card-title">Open Positions</span>
-                <span class="refresh-indicator">Live</span>
+        <!-- Positions Grid (3 columns) -->
+        <div class="grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+            <!-- Open Positions -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Open Positions</span>
+                    <span class="refresh-indicator">Live</span>
+                </div>
+                <div class="table-container" id="open-positions-container" style="max-height: 400px; overflow-y: auto;">
+                    <div class="empty-state">Loading...</div>
+                </div>
             </div>
-            <div class="table-container" id="open-positions-container">
-                <div class="empty-state">Loading positions...</div>
-            </div>
-        </div>
 
-        <!-- Closed Positions Section -->
-        <div class="card" style="margin-bottom: 24px;">
-            <div class="card-header">
-                <span class="card-title">Closed Positions</span>
-                <span class="refresh-indicator">Live</span>
+            <!-- Closed Positions (Pending Redemption) -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Pending Redemption</span>
+                    <span class="refresh-indicator">Live</span>
+                </div>
+                <div class="table-container" id="closed-positions-container" style="max-height: 400px; overflow-y: auto;">
+                    <div class="empty-state">Loading...</div>
+                </div>
             </div>
-            <div class="table-container" id="closed-positions-container">
-                <div class="empty-state">Loading positions...</div>
+
+            <!-- Redeemed Positions (Historical) -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Redeemed</span>
+                    <span id="redeemed-history-count" class="refresh-indicator">-</span>
+                </div>
+                <div class="table-container" id="redeemed-history-container" style="max-height: 400px; overflow-y: auto;">
+                    <div class="empty-state">Loading...</div>
+                </div>
+                <div id="redeemed-history-pagination" style="margin-top: 12px; text-align: center; display: none;">
+                    <button class="btn" id="redeemed-history-load-more">Load More</button>
+                </div>
             </div>
         </div>
 
@@ -658,33 +685,6 @@
             </div>
         </div>
 
-        <!-- Pending Redemption (closed but not yet redeemed) -->
-        <div class="card" style="margin-top: 24px;">
-            <div class="card-header">
-                <span class="card-title">Pending Redemption</span>
-                <span id="pending-redemption-count" class="refresh-indicator">-</span>
-            </div>
-            <div class="table-container" id="pending-redemption-container">
-                <div class="empty-state">Loading...</div>
-            </div>
-            <div id="pending-redemption-pagination" style="margin-top: 12px; text-align: center; display: none;">
-                <button class="btn" id="pending-redemption-load-more">Load More</button>
-            </div>
-        </div>
-
-        <!-- Redeemed Positions History -->
-        <div class="card" style="margin-top: 24px;">
-            <div class="card-header">
-                <span class="card-title">Redeemed Positions</span>
-                <span id="redeemed-history-count" class="refresh-indicator">-</span>
-            </div>
-            <div class="table-container" id="redeemed-history-container">
-                <div class="empty-state">Loading history...</div>
-            </div>
-            <div id="redeemed-history-pagination" style="margin-top: 12px; text-align: center; display: none;">
-                <button class="btn" id="redeemed-history-load-more">Load More</button>
-            </div>
-        </div>
     </div>
 
     <script>
@@ -1234,45 +1234,7 @@
             }
         }
 
-        // Pending redemption (not yet redeemed)
-        let pendingRedemptionOffset = 0;
-        let allPendingRedemption = [];
-
-        async function fetchPendingRedemption(loadMore = false) {
-            try {
-                if (!loadMore) {
-                    pendingRedemptionOffset = 0;
-                    allPendingRedemption = [];
-                }
-
-                const resp = await fetch(`/api/closed-positions?limit=20&offset=${pendingRedemptionOffset}&redeemed=false`);
-                const data = await resp.json();
-
-                document.getElementById('pending-redemption-count').textContent = `${data.total || 0} pending`;
-
-                if (loadMore) {
-                    allPendingRedemption = [...allPendingRedemption, ...data.positions];
-                } else {
-                    allPendingRedemption = data.positions;
-                }
-                pendingRedemptionOffset += data.count;
-
-                const pagination = document.getElementById('pending-redemption-pagination');
-                pagination.style.display = data.has_more ? 'block' : 'none';
-
-                if (allPendingRedemption.length === 0) {
-                    document.getElementById('pending-redemption-container').innerHTML = `
-                        <div class="empty-state">No positions pending redemption</div>
-                    `;
-                } else {
-                    document.getElementById('pending-redemption-container').innerHTML = renderClosedPositionsTable(allPendingRedemption);
-                }
-            } catch (e) {
-                console.error('Pending redemption fetch error:', e);
-            }
-        }
-
-        // Redeemed positions history
+        // Redeemed positions history (from database)
         let redeemedHistoryOffset = 0;
         let allRedeemedHistory = [];
 
@@ -1351,7 +1313,6 @@
         // Event listeners for load more buttons
         document.getElementById('alerts-load-more').addEventListener('click', () => fetchAlerts(true));
         document.getElementById('trades-load-more').addEventListener('click', () => fetchTrades(true));
-        document.getElementById('pending-redemption-load-more').addEventListener('click', () => fetchPendingRedemption(true));
         document.getElementById('redeemed-history-load-more').addEventListener('click', () => fetchRedeemedHistory(true));
 
         // Initial load
@@ -1363,7 +1324,6 @@
         fetchTrades();
         fetchOrders();
         fetchPositions();
-        fetchPendingRedemption();
         fetchRedeemedHistory();
 
         // Refresh intervals
@@ -1374,8 +1334,7 @@
         setInterval(() => fetchTrades(false), 30000);     // Trades every 30s
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
         setInterval(fetchPositions, 30000);  // Positions every 30s
-        setInterval(() => fetchPendingRedemption(false), 60000);  // Pending redemption every 60s
-        setInterval(() => fetchRedeemedHistory(false), 60000);    // Redeemed history every 60s
+        setInterval(() => fetchRedeemedHistory(false), 60000);  // Redeemed history every 60s
 
         addLogLine('info', 'Live updates enabled');
     </script>
