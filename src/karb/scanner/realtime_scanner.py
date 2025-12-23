@@ -395,9 +395,8 @@ class RealtimeScanner:
             except Exception as e:
                 log.error("Arbitrage callback error", error=str(e))
 
-        # Save alert to file for dashboard (non-blocking, runs in background)
-        loop = asyncio.get_event_loop()
-        loop.run_in_executor(None, self._save_alert, alert, first_seen, duration_secs)
+        # Save alert to database (non-blocking, creates async task)
+        self._save_alert(alert, first_seen, duration_secs)
 
         # Send Slack notification (already async)
         try:
