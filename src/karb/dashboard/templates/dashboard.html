@@ -856,6 +856,7 @@
                                     <th>Time</th>
                                     <th>Market</th>
                                     <th>Side</th>
+                                    <th>Qty</th>
                                     <th>Price</th>
                                     <th>Cost</th>
                                 </tr>
@@ -866,6 +867,7 @@
                                         <td>${new Date(t.timestamp.endsWith('Z') ? t.timestamp : t.timestamp + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
                                         <td>${t.market}</td>
                                         <td>${t.side}</td>
+                                        <td>${t.size}</td>
                                         <td>$${t.price.toFixed(3)}</td>
                                         <td>$${t.cost.toFixed(2)}</td>
                                     </tr>
@@ -974,13 +976,13 @@
                                         <span style="color: ${e.yes_order.status === 'filled' ? 'var(--accent-green)' : e.yes_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
                                             ${e.yes_order.status}
                                         </span>
-                                        <span style="color: var(--text-secondary); font-size: 11px;"> $${e.yes_order.price.toFixed(3)}</span>
+                                        <span style="color: var(--text-secondary); font-size: 11px;"> ${e.yes_order.filled_size || e.yes_order.size}@$${e.yes_order.price.toFixed(3)}</span>
                                     </td>
                                     <td>
                                         <span style="color: ${e.no_order.status === 'filled' ? 'var(--accent-green)' : e.no_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
                                             ${e.no_order.status}
                                         </span>
-                                        <span style="color: var(--text-secondary); font-size: 11px;"> $${e.no_order.price.toFixed(3)}</span>
+                                        <span style="color: var(--text-secondary); font-size: 11px;"> ${e.no_order.filled_size || e.no_order.size}@$${e.no_order.price.toFixed(3)}</span>
                                     </td>
                                     <td><span style="color: ${statusColor}; font-weight: 600;">${e.status.toUpperCase()}</span></td>
                                     <td>$${e.total_cost.toFixed(2)}</td>
