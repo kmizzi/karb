@@ -409,6 +409,22 @@ class AsyncClobClient:
 
         return response.json()
 
+    async def get_positions(self) -> list[dict]:
+        """Get current positions."""
+        path = "/positions"
+        headers = self._get_l2_headers("GET", path)
+
+        response = await self._client.get(
+            f"{self.host}{path}",
+            headers=headers,
+        )
+
+        if response.status_code != 200:
+            log.error("Failed to get positions", status=response.status_code)
+            return []
+
+        return response.json()
+
 
 async def create_async_clob_client() -> Optional[AsyncClobClient]:
     """Create an AsyncClobClient from settings."""

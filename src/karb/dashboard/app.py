@@ -18,6 +18,7 @@ from karb.data.repositories import (
     StatsRepository,
     TradeRepository,
 )
+from karb.executor.async_clob import create_async_clob_client
 from karb.tracking.portfolio import PortfolioTracker
 from karb.utils.logging import get_logger
 
@@ -132,6 +133,36 @@ def create_app() -> FastAPI:
             log.error("Failed to get balances", error=str(e))
             return {"error": str(e)}
 
+    @app.get("/api/positions")
+    async def get_positions(username: str = Depends(verify_credentials)):
+        """Get current positions from Polymarket."""
+        try:
+            client = await create_async_clob_client()
+            if not client:
+                return {"positions": [], "error": "CLOB client not available"}
+
+            positions = await client.get_positions()
+            await client.close()
+
+            # Format positions for display
+            formatted = []
+            for p in positions:
+                formatted.append({
+                    "market": p.get("market", ""),
+                    "outcome": p.get("outcome", ""),
+                    "size": float(p.get("size", 0)),
+                    "avg_price": float(p.get("avgPrice", 0)),
+                    "current_price": float(p.get("curPrice", 0)),
+                    "pnl": float(p.get("pnl", 0)),
+                    "realized_pnl": float(p.get("realizedPnl", 0)),
+                    "token_id": p.get("asset", ""),
+                })
+
+            return {"positions": formatted, "count": len(formatted)}
+        except Exception as e:
+            log.error("Failed to get positions", error=str(e))
+            return {"positions": [], "error": str(e)}
+
     @app.get("/api/trades")
     async def get_trades(
         limit: int = 20,
@@ -146,6 +177,7 @@ def create_app() -> FastAPI:
                     "platform": t.get("platform", ""),
                     "market": (t.get("market_name", "") or "")[:50],
                     "side": t.get("side", ""),
+                    "outcome": t.get("outcome", ""),
                     "price": float(t.get("price", 0)),
                     "size": float(t.get("size", 0)),
                     "cost": float(t.get("cost", 0)),
@@ -199,6 +231,7 @@ def create_app() -> FastAPI:
                     "price": float(e.get("yes_price", 0) or 0),
                     "size": float(e.get("yes_size", 0) or 0),
                     "filled_size": float(e.get("yes_filled_size", 0) or 0),
+                    "error": e.get("yes_error"),
                 },
                 "no_order": {
                     "order_id": e.get("no_order_id"),
@@ -206,6 +239,7 @@ def create_app() -> FastAPI:
                     "price": float(e.get("no_price", 0) or 0),
                     "size": float(e.get("no_size", 0) or 0),
                     "filled_size": float(e.get("no_filled_size", 0) or 0),
+                    "error": e.get("no_error"),
                 },
                 "total_cost": float(e.get("total_cost", 0) or 0),
                 "expected_profit": float(e.get("expected_profit", 0) or 0),

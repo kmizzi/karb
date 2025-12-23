@@ -653,11 +653,13 @@ class OrderExecutor:
                 yes_price=float(result.yes_order.price),
                 yes_size=float(result.yes_order.size),
                 yes_filled_size=float(result.yes_order.filled_size),
+                yes_error=result.yes_order.error,
                 no_order_id=result.no_order.order_id,
                 no_status=result.no_order.status.value,
                 no_price=float(result.no_order.price),
                 no_size=float(result.no_order.size),
                 no_filled_size=float(result.no_order.filled_size),
+                no_error=result.no_order.error,
                 total_cost=float(result.total_cost),
                 expected_profit=float(result.expected_profit),
             )

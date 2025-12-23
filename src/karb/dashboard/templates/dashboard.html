@@ -594,6 +594,17 @@
             </div>
         </div>
 
+        <!-- Positions Section -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title">Current Positions</span>
+                <span class="refresh-indicator">Live</span>
+            </div>
+            <div class="table-container" id="positions-container">
+                <div class="empty-state">Loading positions...</div>
+            </div>
+        </div>
+
         <!-- Orders Section -->
         <div class="card" style="margin-bottom: 24px;">
             <div class="card-header">
@@ -856,6 +867,7 @@
                                     <th>Time</th>
                                     <th>Market</th>
                                     <th>Side</th>
+                                    <th>Outcome</th>
                                     <th>Qty</th>
                                     <th>Price</th>
                                     <th>Cost</th>
@@ -867,6 +879,7 @@
                                         <td>${new Date(t.timestamp.endsWith('Z') ? t.timestamp : t.timestamp + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
                                         <td>${t.market}</td>
                                         <td>${t.side}</td>
+                                        <td><span style="color: ${t.outcome === 'yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${(t.outcome || '').toUpperCase()}</span></td>
                                         <td>${t.size}</td>
                                         <td>$${t.price.toFixed(3)}</td>
                                         <td>$${t.cost.toFixed(2)}</td>
@@ -878,6 +891,60 @@
                 }
             } catch (e) {
                 console.error('Trades fetch error:', e);
+            }
+        }
+
+        async function fetchPositions() {
+            try {
+                const resp = await fetch('/api/positions');
+                const data = await resp.json();
+
+                if (data.error) {
+                    document.getElementById('positions-container').innerHTML = `
+                        <div class="empty-state">${data.error}</div>
+                    `;
+                    return;
+                }
+
+                if (!data.positions || data.positions.length === 0) {
+                    document.getElementById('positions-container').innerHTML = `
+                        <div class="empty-state">No open positions</div>
+                    `;
+                } else {
+                    document.getElementById('positions-container').innerHTML = `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Market</th>
+                                    <th>Outcome</th>
+                                    <th>Size</th>
+                                    <th>Avg Price</th>
+                                    <th>Current</th>
+                                    <th>P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.positions.map(p => {
+                                    const pnlColor = p.pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                                    return `
+                                    <tr>
+                                        <td>${p.market || p.token_id?.substring(0, 20) || 'Unknown'}</td>
+                                        <td><span style="color: ${p.outcome === 'Yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${p.outcome || '-'}</span></td>
+                                        <td>${p.size}</td>
+                                        <td>$${p.avg_price?.toFixed(3) || '-'}</td>
+                                        <td>$${p.current_price?.toFixed(3) || '-'}</td>
+                                        <td style="color: ${pnlColor}; font-weight: 600;">$${p.pnl?.toFixed(2) || '0.00'}</td>
+                                    </tr>
+                                `}).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+            } catch (e) {
+                console.error('Positions fetch error:', e);
+                document.getElementById('positions-container').innerHTML = `
+                    <div class="empty-state">Failed to load positions</div>
+                `;
             }
         }
 
@@ -968,6 +1035,8 @@
                                     : e.status === 'cancelled' ? 'var(--accent-blue)'
                                     : e.status === 'partial' ? 'var(--accent-yellow)'
                                     : 'var(--accent-red)';
+                                const yesError = e.yes_order.error ? `<div style="color: var(--accent-red); font-size: 10px; max-width: 200px; word-wrap: break-word;">${e.yes_order.error}</div>` : '';
+                                const noError = e.no_order.error ? `<div style="color: var(--accent-red); font-size: 10px; max-width: 200px; word-wrap: break-word;">${e.no_order.error}</div>` : '';
                                 return `
                                 <tr>
                                     <td>${new Date(e.timestamp.endsWith('Z') ? e.timestamp : e.timestamp + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
@@ -977,12 +1046,14 @@
                                             ${e.yes_order.status}
                                         </span>
                                         <span style="color: var(--text-secondary); font-size: 11px;"> ${e.yes_order.filled_size || e.yes_order.size}@$${e.yes_order.price.toFixed(3)}</span>
+                                        ${yesError}
                                     </td>
                                     <td>
                                         <span style="color: ${e.no_order.status === 'filled' ? 'var(--accent-green)' : e.no_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
                                             ${e.no_order.status}
                                         </span>
                                         <span style="color: var(--text-secondary); font-size: 11px;"> ${e.no_order.filled_size || e.no_order.size}@$${e.no_order.price.toFixed(3)}</span>
+                                        ${noError}
                                     </td>
                                     <td><span style="color: ${statusColor}; font-weight: 600;">${e.status.toUpperCase()}</span></td>
                                     <td>$${e.total_cost.toFixed(2)}</td>
@@ -1015,6 +1086,7 @@
         fetchAlerts();
         fetchTrades();
         fetchOrders();
+        fetchPositions();
 
         // Refresh intervals
         setInterval(fetchStatus, 5000);      // Status every 5s
@@ -1023,6 +1095,7 @@
         setInterval(fetchAlerts, 5000);      // Alerts every 5s
         setInterval(fetchTrades, 30000);     // Trades every 30s
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
+        setInterval(fetchPositions, 30000);  // Positions every 30s
 
         addLogLine('info', 'Live updates enabled');
     </script>

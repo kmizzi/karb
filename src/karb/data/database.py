@@ -187,11 +187,13 @@ CREATE TABLE IF NOT EXISTS executions (
     yes_price REAL,
     yes_size REAL,
     yes_filled_size REAL,
+    yes_error TEXT,
     no_order_id TEXT,
     no_status TEXT,
     no_price REAL,
     no_size REAL,
     no_filled_size REAL,
+    no_error TEXT,
     total_cost REAL DEFAULT 0,
     expected_profit REAL DEFAULT 0
 );

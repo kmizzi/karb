@@ -186,11 +186,13 @@ class ExecutionRepository:
         yes_price: Optional[float] = None,
         yes_size: Optional[float] = None,
         yes_filled_size: Optional[float] = None,
+        yes_error: Optional[str] = None,
         no_order_id: Optional[str] = None,
         no_status: Optional[str] = None,
         no_price: Optional[float] = None,
         no_size: Optional[float] = None,
         no_filled_size: Optional[float] = None,
+        no_error: Optional[str] = None,
         total_cost: float = 0.0,
         expected_profit: float = 0.0,
     ) -> int:
@@ -200,15 +202,15 @@ class ExecutionRepository:
                 """
                 INSERT INTO executions (
                     timestamp, market, status,
-                    yes_order_id, yes_status, yes_price, yes_size, yes_filled_size,
-                    no_order_id, no_status, no_price, no_size, no_filled_size,
+                    yes_order_id, yes_status, yes_price, yes_size, yes_filled_size, yes_error,
+                    no_order_id, no_status, no_price, no_size, no_filled_size, no_error,
                     total_cost, expected_profit
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp, market, status,
-                    yes_order_id, yes_status, yes_price, yes_size, yes_filled_size,
-                    no_order_id, no_status, no_price, no_size, no_filled_size,
+                    yes_order_id, yes_status, yes_price, yes_size, yes_filled_size, yes_error,
+                    no_order_id, no_status, no_price, no_size, no_filled_size, no_error,
                     total_cost, expected_profit
                 ),
             )
