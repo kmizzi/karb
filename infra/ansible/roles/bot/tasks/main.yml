@@ -92,28 +92,6 @@
     virtualenv: /opt/karb/venv
   notify: Restart karb
 
-- name: Check if database exists
-  stat:
-    path: /home/karb/.karb/karb.db
-  register: db_exists
-
-- name: Run database migration
-  shell: |
-    cd /opt/karb && /opt/karb/venv/bin/python scripts/migrate_to_sqlite.py
-  environment:
-    HOME: /home/karb
-  when: not db_exists.stat.exists
-  register: migration_result
-  changed_when: migration_result.rc == 0
-
-- name: Fix database ownership
-  file:
-    path: /home/karb/.karb/karb.db
-    owner: karb
-    group: karb
-    mode: '0644'
-  when: not db_exists.stat.exists
-
 - name: Create .env file from template
   template:
     src: env.j2
