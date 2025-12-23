@@ -483,20 +483,10 @@
             to { transform: rotate(360deg); }
         }
 
-        @media (max-width: 1200px) {
-            .grid[style*="repeat(3"] { grid-template-columns: 1fr !important; }
-        }
-
         @media (max-width: 768px) {
             .grid { grid-template-columns: 1fr; }
             .stat-value { font-size: 24px; }
             .terminal-body { height: 200px; }
-        }
-
-        /* Compact tables for position cards */
-        .compact-table th, .compact-table td {
-            padding: 8px 4px;
-            font-size: 11px;
         }
     </style>
 </head>
@@ -604,26 +594,26 @@
             </div>
         </div>
 
-        <!-- Positions Grid (3 columns) -->
-        <div class="grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+        <!-- Positions Section -->
+        <div style="margin-bottom: 24px;">
             <!-- Open Positions -->
-            <div class="card">
+            <div class="card" style="margin-bottom: 12px;">
                 <div class="card-header">
                     <span class="card-title">Open Positions</span>
                     <span class="refresh-indicator">Live</span>
                 </div>
-                <div class="table-container" id="open-positions-container" style="max-height: 400px; overflow-y: auto;">
+                <div class="table-container" id="open-positions-container">
                     <div class="empty-state">Loading...</div>
                 </div>
             </div>
 
             <!-- Closed Positions (Pending Redemption) -->
-            <div class="card">
+            <div class="card" style="margin-bottom: 12px;">
                 <div class="card-header">
                     <span class="card-title">Pending Redemption</span>
                     <span class="refresh-indicator">Live</span>
                 </div>
-                <div class="table-container" id="closed-positions-container" style="max-height: 400px; overflow-y: auto;">
+                <div class="table-container" id="closed-positions-container">
                     <div class="empty-state">Loading...</div>
                 </div>
             </div>
@@ -631,10 +621,10 @@
             <!-- Redeemed Positions (Historical) -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">Redeemed</span>
+                    <span class="card-title">Redeemed Positions</span>
                     <span id="redeemed-history-count" class="refresh-indicator">-</span>
                 </div>
-                <div class="table-container" id="redeemed-history-container" style="max-height: 400px; overflow-y: auto;">
+                <div class="table-container" id="redeemed-history-container">
                     <div class="empty-state">Loading...</div>
                 </div>
                 <div id="redeemed-history-pagination" style="margin-top: 12px; text-align: center; display: none;">
