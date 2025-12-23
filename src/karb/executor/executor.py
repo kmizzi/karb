@@ -610,12 +610,26 @@ class OrderExecutor:
                         if yes_order_id and not yes_filled:
                             if not isinstance(results[idx], Exception):
                                 yes_status = results[idx]
-                                yes_filled = yes_status.get("status", "").lower() in ("filled", "matched")
+                                status_str = yes_status.get("status", "").lower()
+                                yes_filled = status_str in ("filled", "matched")
+                                log.debug("YES order status check", status=status_str, filled=yes_filled)
+                                # If order is cancelled/expired, it won't fill - stop waiting
+                                if status_str in ("canceled", "cancelled", "expired", "not_matched"):
+                                    log.info("YES order cancelled/expired, won't fill", status=status_str)
+                            else:
+                                log.warning("YES order status check failed", error=str(results[idx]))
                             idx += 1
                         if no_order_id and not no_filled and idx < len(results):
                             if not isinstance(results[idx], Exception):
                                 no_status = results[idx]
-                                no_filled = no_status.get("status", "").lower() in ("filled", "matched")
+                                status_str = no_status.get("status", "").lower()
+                                no_filled = status_str in ("filled", "matched")
+                                log.debug("NO order status check", status=status_str, filled=no_filled)
+                                # If order is cancelled/expired, it won't fill - stop waiting
+                                if status_str in ("canceled", "cancelled", "expired", "not_matched"):
+                                    log.info("NO order cancelled/expired, won't fill", status=status_str)
+                            else:
+                                log.warning("NO order status check failed", error=str(results[idx]))
                 else:
                     # Fallback to sync with executor
                     loop = asyncio.get_event_loop()

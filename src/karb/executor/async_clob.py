@@ -528,7 +528,14 @@ class AsyncClobClient:
             headers=headers,
         )
 
-        return response.json()
+        try:
+            data = response.json()
+            log.debug("get_order response", order_id=order_id[:20], status=data.get("status"), response=str(data)[:100])
+            return data
+        except Exception as e:
+            log.warning("get_order JSON parse error", order_id=order_id[:20], status_code=response.status_code, text=response.text[:100])
+            # Return a dict indicating unknown status
+            return {"orderID": order_id, "status": "unknown", "error": str(e)}
 
     async def cancel_all(self) -> dict[str, Any]:
         """Cancel all open orders."""
