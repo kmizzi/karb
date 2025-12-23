@@ -657,6 +657,34 @@
         const activityFeed = document.getElementById('activity-feed');
         let lastPriceUpdates = 0;
 
+        // Helper function to format timestamps properly
+        function formatDateTime(timestamp) {
+            if (!timestamp) return '-';
+            try {
+                // Handle various timestamp formats
+                let dateStr = timestamp;
+                // If it has +00:00 timezone, it's already valid ISO
+                // If it doesn't have timezone info, append Z
+                if (!dateStr.includes('+') && !dateStr.includes('Z')) {
+                    dateStr += 'Z';
+                }
+                const date = new Date(dateStr);
+                if (isNaN(date.getTime())) return '-';
+
+                return date.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true,
+                    timeZone: 'America/Los_Angeles'
+                });
+            } catch (e) {
+                return '-';
+            }
+        }
+
         function addLogLine(type, message) {
             const now = new Date();
             const time = now.toTimeString().slice(0, 8);
@@ -887,7 +915,7 @@
                             <tbody>
                                 ${data.trades.map(t => `
                                     <tr>
-                                        <td>${new Date(t.timestamp.endsWith('Z') ? t.timestamp : t.timestamp + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
+                                        <td>${formatDateTime(t.timestamp)}</td>
                                         <td>${t.market}</td>
                                         <td>${t.side}</td>
                                         <td><span style="color: ${t.outcome === 'yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${(t.outcome || '').toUpperCase()}</span></td>
@@ -1037,7 +1065,7 @@
                                     <td>$${o.price.toFixed(3)}</td>
                                     <td>${o.size}</td>
                                     <td><span style="color: var(--accent-yellow);">${o.status}</span></td>
-                                    <td>${new Date(o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
+                                    <td>${formatDateTime(o.created_at)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -1068,7 +1096,7 @@
                                 const noError = e.no_order.error ? `<div style="color: var(--accent-red); font-size: 10px; max-width: 200px; word-wrap: break-word;">${e.no_order.error}</div>` : '';
                                 return `
                                 <tr>
-                                    <td>${new Date(e.timestamp.endsWith('Z') ? e.timestamp : e.timestamp + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
+                                    <td>${formatDateTime(e.timestamp)}</td>
                                     <td>${e.market}</td>
                                     <td>
                                         <span style="color: ${e.yes_order.status === 'filled' ? 'var(--accent-green)' : e.yes_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
