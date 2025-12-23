@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from karb.api.gamma import GammaClient
 from karb.api.models import Market
@@ -97,6 +97,7 @@ class RealtimeScanner:
     def __init__(
         self,
         on_arbitrage: Optional[ArbitrageCallback] = None,
+        on_markets_loaded: Optional[Callable[[list["Market"]], Awaitable[None]]] = None,
         min_liquidity: Optional[float] = None,
         max_days_until_resolution: Optional[int] = None,
         num_connections: Optional[int] = None,
@@ -127,6 +128,7 @@ class RealtimeScanner:
             self.ws_clients.append(client)
 
         self._on_arbitrage = on_arbitrage
+        self._on_markets_loaded = on_markets_loaded
 
         # State
         self._markets: dict[str, Market] = {}  # market_id -> Market
@@ -424,7 +426,14 @@ class RealtimeScanner:
         )
 
         # Load markets
-        await self.load_markets()
+        markets = await self.load_markets()
+
+        # Call on_markets_loaded callback if provided (for pre-caching neg_risk, etc.)
+        if self._on_markets_loaded:
+            try:
+                await self._on_markets_loaded(markets)
+            except Exception as e:
+                log.warning("on_markets_loaded callback failed", error=str(e))
 
         # Connect all WebSocket clients
         for i, client in enumerate(self.ws_clients):

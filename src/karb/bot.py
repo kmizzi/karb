@@ -240,16 +240,45 @@ class RealtimeArbitrageBot:
 
         settings = get_settings()
 
+        # Create executor first so we can use its client for pre-caching
+        self.executor = OrderExecutor()
+
         self.scanner = RealtimeScanner(
             on_arbitrage=self._on_arbitrage,
+            on_markets_loaded=self._on_markets_loaded,
             min_liquidity=settings.min_liquidity_usd,
         )
-        self.executor = OrderExecutor()
 
         self.stats = BotStats()
         self._running = False
         self._execution_lock = asyncio.Lock()
         self._redemption_task: Optional[asyncio.Task] = None
+
+    async def _on_markets_loaded(self, markets: list) -> None:
+        """
+        Pre-cache neg_risk status for all tokens when markets are loaded.
+
+        This eliminates the ~500ms neg_risk API call during order execution.
+        """
+        from karb.api.models import Market
+
+        # Extract all token IDs
+        token_ids = []
+        for market in markets:
+            if isinstance(market, Market):
+                token_ids.append(market.yes_token.token_id)
+                token_ids.append(market.no_token.token_id)
+
+        if not token_ids:
+            return
+
+        # Get or create async client
+        async_client = await self.executor._ensure_async_client()
+        if async_client:
+            log.info("Pre-caching neg_risk status for all tokens", count=len(token_ids))
+            await async_client.prefetch_neg_risk(token_ids)
+        else:
+            log.warning("Async CLOB client not available - skipping neg_risk pre-cache")
 
     async def _on_arbitrage(self, alert) -> None:
         """Handle arbitrage alert from scanner."""

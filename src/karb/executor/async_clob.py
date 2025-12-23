@@ -168,6 +168,57 @@ class AsyncClobClient:
         self._neg_risk[token_id] = False
         return False
 
+    async def prefetch_neg_risk(self, token_ids: list[str], batch_size: int = 50) -> dict[str, bool]:
+        """
+        Pre-fetch neg_risk status for multiple tokens in parallel.
+
+        This should be called at startup to warm the cache and avoid
+        latency during order execution.
+
+        Args:
+            token_ids: List of token IDs to check
+            batch_size: Number of concurrent requests (avoid overwhelming API)
+
+        Returns:
+            Dictionary of token_id -> neg_risk status
+        """
+        # Filter out tokens we already have cached
+        tokens_to_fetch = [t for t in token_ids if t not in self._neg_risk]
+
+        if not tokens_to_fetch:
+            log.info("All neg_risk values already cached", cached=len(self._neg_risk))
+            return self._neg_risk.copy()
+
+        log.info(
+            "Pre-fetching neg_risk status",
+            total_tokens=len(token_ids),
+            to_fetch=len(tokens_to_fetch),
+            already_cached=len(token_ids) - len(tokens_to_fetch),
+        )
+
+        t0 = time.time()
+
+        # Fetch in batches to avoid overwhelming the API
+        for i in range(0, len(tokens_to_fetch), batch_size):
+            batch = tokens_to_fetch[i:i + batch_size]
+            tasks = [self.get_neg_risk(token_id) for token_id in batch]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        t1 = time.time()
+
+        # Count results
+        neg_risk_count = sum(1 for v in self._neg_risk.values() if v)
+
+        log.info(
+            "neg_risk pre-fetch complete",
+            fetched=len(tokens_to_fetch),
+            neg_risk_true=neg_risk_count,
+            neg_risk_false=len(self._neg_risk) - neg_risk_count,
+            duration_ms=int((t1 - t0) * 1000),
+        )
+
+        return self._neg_risk.copy()
+
     def _build_hmac_signature(
         self,
         timestamp: int,
@@ -314,18 +365,23 @@ class AsyncClobClient:
         price: float,
         size: float,
         neg_risk: Optional[bool] = None,
+        order_type: str = "FOK",  # Default to Fill-or-Kill for arbitrage
     ) -> dict[str, Any]:
         """
         Sign and submit an order in one call.
 
         Args:
             neg_risk: If None, auto-detects from API. If provided, uses that value.
+            order_type: "FOK" (Fill-or-Kill), "GTC" (Good-til-Cancelled), "GTD", "FAK"
 
         For maximum parallelization, use sign_order + post_order separately.
         """
+        t0 = time.time()
+
         # Auto-detect neg_risk if not provided
         if neg_risk is None:
             neg_risk = await self.get_neg_risk(token_id)
+        t1 = time.time()
 
         # Run signing in thread pool to not block event loop
         loop = asyncio.get_event_loop()
@@ -338,29 +394,60 @@ class AsyncClobClient:
             size,
             neg_risk,
         )
+        t2 = time.time()
 
-        return await self.post_order(signed_order)
+        result = await self.post_order(signed_order, order_type=order_type)
+        t3 = time.time()
+
+        log.debug(
+            "Order timing breakdown",
+            neg_risk_ms=int((t1 - t0) * 1000),
+            sign_ms=int((t2 - t1) * 1000),
+            submit_ms=int((t3 - t2) * 1000),
+            total_ms=int((t3 - t0) * 1000),
+        )
+
+        return result
 
     async def submit_orders_parallel(
         self,
         orders: list[tuple[str, str, float, float, Optional[bool]]],
+        order_type: str = "FOK",
     ) -> list[dict[str, Any]]:
         """
-        Submit multiple orders in parallel.
+        Submit multiple orders in parallel with optimized latency.
 
         Args:
             orders: List of (token_id, side, price, size, neg_risk) tuples
                     neg_risk can be None for auto-detection
+            order_type: Order type - "FOK" (Fill-or-Kill) recommended for arbitrage
 
         Returns:
             List of API responses
         """
-        # Auto-detect neg_risk for orders where it's None
+        t0 = time.time()
+
+        # Auto-detect neg_risk for orders where it's None, in parallel
+        tokens_needing_check = [
+            token_id for token_id, side, price, size, neg_risk in orders if neg_risk is None
+        ]
+
+        # Fetch all neg_risk values in parallel (only for tokens that need checking)
+        if tokens_needing_check:
+            neg_risk_results = await asyncio.gather(
+                *[self.get_neg_risk(token_id) for token_id in tokens_needing_check]
+            )
+            neg_risk_map = dict(zip(tokens_needing_check, neg_risk_results))
+        else:
+            neg_risk_map = {}
+
+        # Build resolved orders with neg_risk values
         resolved_orders = []
         for token_id, side, price, size, neg_risk in orders:
             if neg_risk is None:
-                neg_risk = await self.get_neg_risk(token_id)
+                neg_risk = neg_risk_map.get(token_id, False)
             resolved_orders.append((token_id, side, price, size, neg_risk))
+        t1 = time.time()
 
         # Sign all orders in parallel using thread pool
         loop = asyncio.get_event_loop()
@@ -377,14 +464,27 @@ class AsyncClobClient:
             for token_id, side, price, size, neg_risk in resolved_orders
         ]
         signed_orders = await asyncio.gather(*sign_tasks)
+        t2 = time.time()
 
         # Submit all orders in parallel
         post_tasks = [
-            self.post_order(signed_order)
+            self.post_order(signed_order, order_type=order_type)
             for signed_order in signed_orders
         ]
 
-        return await asyncio.gather(*post_tasks, return_exceptions=True)
+        results = await asyncio.gather(*post_tasks, return_exceptions=True)
+        t3 = time.time()
+
+        log.debug(
+            "Parallel order timing breakdown",
+            neg_risk_ms=int((t1 - t0) * 1000),
+            sign_ms=int((t2 - t1) * 1000),
+            submit_ms=int((t3 - t2) * 1000),
+            total_ms=int((t3 - t0) * 1000),
+            order_count=len(orders),
+        )
+
+        return results
 
     async def cancel_order(self, order_id: str) -> dict[str, Any]:
         """Cancel an order by ID."""

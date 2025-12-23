@@ -395,6 +395,113 @@ class OrderExecutor:
             log.error("Get order error", order_id=order_id[:20], error=str(e))
             raise
 
+    async def _attempt_unwind(
+        self,
+        token_id: str,
+        side: str,
+        size: float,
+        buy_price: float,
+        market_name: str,
+    ) -> bool:
+        """
+        Attempt to immediately unwind a position after a partial fill.
+
+        Uses aggressive pricing (sell slightly below best bid) to ensure fill.
+        This accepts a small loss to exit an unhedged position immediately.
+
+        Args:
+            token_id: Token to sell
+            side: Should be "SELL"
+            size: Size to sell
+            buy_price: Price we bought at (for loss calculation)
+            market_name: Market name for logging
+
+        Returns:
+            True if unwind succeeded
+        """
+        async_client = self._async_client
+
+        if not async_client:
+            log.error("Cannot unwind - no async client available")
+            return False
+
+        # Sell at a discount to ensure fill (accept 2-3% loss to exit immediately)
+        # This is better than holding an unhedged directional position
+        unwind_price = buy_price * 0.97  # Sell 3% below what we paid
+
+        log.warning(
+            "Attempting emergency unwind",
+            token_id=token_id[:16],
+            size=size,
+            buy_price=buy_price,
+            unwind_price=unwind_price,
+            expected_loss=f"${(buy_price - unwind_price) * size:.2f}",
+        )
+
+        try:
+            # Use GTC order for unwind (FOK might not fill if liquidity is thin)
+            response = await async_client.submit_order(
+                token_id=token_id,
+                side=side,
+                price=unwind_price,
+                size=size,
+                neg_risk=None,  # Auto-detect
+                order_type="GTC",  # GTC for better fill chance
+            )
+
+            status = response.get("status", "").lower()
+            if status in ("filled", "matched"):
+                loss = (buy_price - unwind_price) * size
+                log.info(
+                    "Unwind successful",
+                    token_id=token_id[:16],
+                    status=status,
+                    loss=f"${loss:.2f}",
+                )
+
+                # Send notification about unwind
+                try:
+                    notifier = get_notifier()
+                    asyncio.create_task(notifier.send_message(
+                        f"🔄 Emergency unwind: Sold {size:.2f} tokens at ${unwind_price:.4f} "
+                        f"(bought at ${buy_price:.4f}). Loss: ${loss:.2f}\n"
+                        f"Market: {market_name[:50]}"
+                    ))
+                except Exception:
+                    pass
+
+                return True
+            else:
+                log.warning(
+                    "Unwind order submitted but not immediately filled",
+                    token_id=token_id[:16],
+                    status=status,
+                    order_id=response.get("orderID", "")[:20],
+                )
+                return False
+
+        except Exception as e:
+            log.error(
+                "Unwind failed",
+                token_id=token_id[:16],
+                error=str(e),
+            )
+
+            # Send alert about failed unwind
+            try:
+                notifier = get_notifier()
+                asyncio.create_task(notifier.send_message(
+                    f"⚠️ FAILED UNWIND: Could not sell {size:.2f} tokens\n"
+                    f"Token: {token_id[:16]}...\n"
+                    f"Error: {str(e)}\n"
+                    f"Market: {market_name[:50]}\n"
+                    f"MANUAL INTERVENTION REQUIRED"
+                ))
+            except Exception:
+                pass
+
+            return False
+
     async def _wait_for_fills(
         self,
         yes_order_id: Optional[str],
@@ -925,7 +1032,7 @@ class OrderExecutor:
             total_cost = Decimal("0")
             log.warning("Both orders cancelled due to timeout - no position taken")
         else:
-            # Partial fill or mixed status - this is risky!
+            # Partial fill or mixed status - IMMEDIATELY TRY TO UNWIND
             status = ExecutionStatus.PARTIAL
             self.stats.partial += 1
             # Calculate partial cost
@@ -933,18 +1040,34 @@ class OrderExecutor:
             no_cost = no_result.filled_size * opportunity.no_ask
             total_cost = yes_cost + no_cost
 
-            # Log warning about unhedged position
+            # Attempt immediate unwind of the filled side
             if yes_result.status == ExecutionStatus.FILLED and no_result.status != ExecutionStatus.FILLED:
                 log.error(
-                    "UNHEDGED POSITION: YES filled but NO did not!",
+                    "UNHEDGED POSITION: YES filled but NO did not! Attempting immediate unwind...",
                     yes_size=float(yes_result.filled_size),
                     no_status=no_result.status.value,
                 )
+                # Try to sell the YES position immediately
+                await self._attempt_unwind(
+                    token_id=opportunity.market.yes_token.token_id,
+                    side="SELL",
+                    size=float(yes_result.filled_size),
+                    buy_price=float(opportunity.yes_ask),
+                    market_name=opportunity.market.question,
+                )
             elif no_result.status == ExecutionStatus.FILLED and yes_result.status != ExecutionStatus.FILLED:
                 log.error(
-                    "UNHEDGED POSITION: NO filled but YES did not!",
+                    "UNHEDGED POSITION: NO filled but YES did not! Attempting immediate unwind...",
                     no_size=float(no_result.filled_size),
                     yes_status=yes_result.status.value,
+                )
+                # Try to sell the NO position immediately
+                await self._attempt_unwind(
+                    token_id=opportunity.market.no_token.token_id,
+                    side="SELL",
+                    size=float(no_result.filled_size),
+                    buy_price=float(opportunity.no_ask),
+                    market_name=opportunity.market.question,
                 )
 
         result = ExecutionResult(
