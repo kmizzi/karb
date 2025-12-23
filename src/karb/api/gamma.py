@@ -139,6 +139,16 @@ class GammaClient:
                     clob_token_ids = []
             clob_token_ids = clob_token_ids or []
 
+            # Only support binary markets (exactly 2 outcomes)
+            if len(clob_token_ids) != 2:
+                log.debug(
+                    "Skipping non-binary market",
+                    market_id=data.get("id"),
+                    outcomes=len(clob_token_ids),
+                    question=data.get("question", "")[:50],
+                )
+                return None
+
             yes_token = Token(token_id="", outcome="Yes")
             no_token = Token(token_id="", outcome="No")
 
@@ -170,7 +180,8 @@ class GammaClient:
                         )
 
             # Fallback to clobTokenIds array [yes_id, no_id]
-            if clob_token_ids and len(clob_token_ids) >= 2:
+            # (we already verified len == 2 above)
+            if clob_token_ids:
                 if not yes_token.token_id:
                     yes_token.token_id = str(clob_token_ids[0])
                 if not no_token.token_id:
