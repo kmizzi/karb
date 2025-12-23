@@ -1624,7 +1624,14 @@
                 // Format hours for display in PST
                 const labels = data.hours.map(h => {
                     // Parse UTC hour string (YYYY-MM-DD HH:00)
-                    const date = new Date(h.replace(' ', 'T') + ':00:00Z');
+                    // Convert "2025-12-23 19:00" to valid ISO format
+                    const isoString = h.replace(' ', 'T') + ':00Z';
+                    const date = new Date(isoString);
+                    if (isNaN(date.getTime())) {
+                        // Fallback: just show the hour part
+                        const parts = h.split(' ');
+                        return parts[1] || h;
+                    }
                     return date.toLocaleTimeString('en-US', {
                         hour: 'numeric',
                         hour12: true,
