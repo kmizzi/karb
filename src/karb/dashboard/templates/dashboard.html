@@ -722,7 +722,7 @@
             <!-- Redeemed Positions (Historical) -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">Redeemed Positions</span>
+                    <span class="card-title">Closed Positions</span>
                     <span id="redeemed-history-count" class="refresh-indicator">-</span>
                 </div>
                 <div class="table-container" id="redeemed-history-container">
@@ -1493,10 +1493,10 @@
                     allRedeemedHistory = [];
                 }
 
-                const resp = await fetch(`/api/closed-positions?limit=20&offset=${redeemedHistoryOffset}&redeemed=true`);
+                const resp = await fetch(`/api/closed-positions?limit=20&offset=${redeemedHistoryOffset}`);
                 const data = await resp.json();
 
-                document.getElementById('redeemed-history-count').textContent = `${data.total || 0} redeemed`;
+                document.getElementById('redeemed-history-count').textContent = `${data.total || 0} closed`;
 
                 if (loadMore) {
                     allRedeemedHistory = [...allRedeemedHistory, ...data.positions];
@@ -1510,7 +1510,7 @@
 
                 if (allRedeemedHistory.length === 0) {
                     document.getElementById('redeemed-history-container').innerHTML = `
-                        <div class="empty-state">No redeemed positions yet</div>
+                        <div class="empty-state">No closed positions yet</div>
                     `;
                 } else {
                     document.getElementById('redeemed-history-container').innerHTML = renderClosedPositionsTable(allRedeemedHistory);
