@@ -219,6 +219,16 @@ class RealtimeScanner:
                     best_ask_size = a.size
                     break
 
+        # Debug: log when we receive book updates with size data
+        if best_ask_size is not None and best_ask_size > 0:
+            log.debug(
+                "Book update with size",
+                asset_id=update.asset_id[:20] + "...",
+                best_ask=float(update.best_ask) if update.best_ask else None,
+                best_ask_size=float(best_ask_size),
+                num_asks=len(update.asks),
+            )
+
         self._update_prices(
             update.asset_id,
             update.best_bid,
@@ -390,6 +400,8 @@ class RealtimeScanner:
             no_ask=f"${float(alert.no_ask):.4f}",
             combined=f"${float(alert.combined_cost):.4f}",
             profit=f"{float(alert.profit_pct) * 100:.2f}%",
+            yes_liq=f"${float(alert.yes_size_available):.2f}",
+            no_liq=f"${float(alert.no_size_available):.2f}",
             resolves_in=f"{days_until_resolution}d" if days_until_resolution is not None else "unknown",
             open_for=f"{duration_secs:.1f}s",
         )
