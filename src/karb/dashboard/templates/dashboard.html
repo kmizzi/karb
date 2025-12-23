@@ -1161,11 +1161,11 @@
                     </table></div>`;
                 }
 
-                // Recent executions
+                // Recent executions (sorted by time descending - most recent first)
                 if (recentExecs.length > 0) {
                     html += `<h4 style="margin: 16px 0 8px; color: var(--text-secondary);">Recent Executions</h4>`;
-                    html += `<div class="table-container"><table>
-                        <thead>
+                    html += `<div class="table-container" style="max-height: 400px; overflow-y: auto;"><table>
+                        <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 1;">
                             <tr>
                                 <th>Time</th>
                                 <th>Market</th>
@@ -1176,11 +1176,28 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${recentExecs.slice().reverse().map(e => {
-                                const statusColor = e.status === 'filled' ? 'var(--accent-green)'
-                                    : e.status === 'cancelled' ? 'var(--accent-blue)'
-                                    : e.status === 'partial' ? 'var(--accent-yellow)'
-                                    : 'var(--accent-red)';
+                            ${recentExecs.map(e => {
+                                // Determine display status with more detail
+                                let displayStatus = e.status.toUpperCase();
+                                let statusColor = 'var(--accent-red)';
+
+                                if (e.status === 'filled') {
+                                    statusColor = 'var(--accent-green)';
+                                } else if (e.status === 'cancelled') {
+                                    statusColor = 'var(--accent-blue)';
+                                } else if (e.status === 'partial') {
+                                    statusColor = 'var(--accent-yellow)';
+                                    // More descriptive partial statuses
+                                    if (e.yes_order.status === 'submitted' && e.no_order.status === 'submitted') {
+                                        displayStatus = 'TIMEOUT';
+                                        statusColor = 'var(--accent-blue)';
+                                    } else if (e.yes_order.status === 'filled' && e.no_order.status !== 'filled') {
+                                        displayStatus = 'YES ONLY';
+                                    } else if (e.no_order.status === 'filled' && e.yes_order.status !== 'filled') {
+                                        displayStatus = 'NO ONLY';
+                                    }
+                                }
+
                                 const yesError = e.yes_order.error ? `<div style="color: var(--accent-red); font-size: 10px; max-width: 200px; word-wrap: break-word;">${e.yes_order.error}</div>` : '';
                                 const noError = e.no_order.error ? `<div style="color: var(--accent-red); font-size: 10px; max-width: 200px; word-wrap: break-word;">${e.no_order.error}</div>` : '';
                                 return `
@@ -1188,20 +1205,20 @@
                                     <td>${formatDateTime(e.timestamp)}</td>
                                     <td>${e.market}</td>
                                     <td>
-                                        <span style="color: ${e.yes_order.status === 'filled' ? 'var(--accent-green)' : e.yes_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
+                                        <span style="color: ${e.yes_order.status === 'filled' ? 'var(--accent-green)' : e.yes_order.status === 'submitted' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
                                             ${e.yes_order.status}
                                         </span>
                                         <span style="color: var(--text-secondary); font-size: 11px;"> ${e.yes_order.filled_size || e.yes_order.size}@$${e.yes_order.price.toFixed(3)}</span>
                                         ${yesError}
                                     </td>
                                     <td>
-                                        <span style="color: ${e.no_order.status === 'filled' ? 'var(--accent-green)' : e.no_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
+                                        <span style="color: ${e.no_order.status === 'filled' ? 'var(--accent-green)' : e.no_order.status === 'submitted' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
                                             ${e.no_order.status}
                                         </span>
                                         <span style="color: var(--text-secondary); font-size: 11px;"> ${e.no_order.filled_size || e.no_order.size}@$${e.no_order.price.toFixed(3)}</span>
                                         ${noError}
                                     </td>
-                                    <td><span style="color: ${statusColor}; font-weight: 600;">${e.status.toUpperCase()}</span></td>
+                                    <td><span style="color: ${statusColor}; font-weight: 600;">${displayStatus}</span></td>
                                     <td>$${e.total_cost.toFixed(2)}</td>
                                 </tr>
                             `}).join('')}
