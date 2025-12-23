@@ -632,6 +632,34 @@
                     No data yet. Chart will populate when bot starts monitoring markets.
                 </div>
             </div>
+
+            <!-- Arbitrage Alerts Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">🎯 Arbitrage Alerts (Last 7d)</span>
+                    <span class="refresh-indicator">Live</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="alerts-chart"></canvas>
+                </div>
+                <div id="alerts-chart-empty" class="chart-empty" style="display: none;">
+                    No arbitrage alerts yet.
+                </div>
+            </div>
+
+            <!-- Near-Miss Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">⚠️ Near-Miss (Illiquid) (Last 7d)</span>
+                    <span class="refresh-indicator">Live</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="near-miss-chart"></canvas>
+                </div>
+                <div id="near-miss-chart-empty" class="chart-empty" style="display: none;">
+                    No near-miss opportunities yet.
+                </div>
+            </div>
         </div>
 
         <!-- Daily Executions Chart -->
@@ -1613,6 +1641,8 @@
         // Chart instances
         let priceUpdatesChart = null;
         let marketsChart = null;
+        let alertsChart = null;
+        let nearMissChart = null;
         let dailyChart = null;
 
         // Chart.js default configuration for dark theme
@@ -1759,6 +1789,144 @@
             }
         }
 
+        async function fetchAlertsChart() {
+            try {
+                const resp = await fetch('/api/charts/daily-alerts?days=7');
+                const data = await resp.json();
+
+                const canvas = document.getElementById('alerts-chart');
+                const emptyMsg = document.getElementById('alerts-chart-empty');
+
+                if (data.count === 0) {
+                    canvas.style.display = 'none';
+                    emptyMsg.style.display = 'flex';
+                    return;
+                }
+
+                canvas.style.display = 'block';
+                emptyMsg.style.display = 'none';
+
+                // Format dates for display (MM/DD)
+                const labels = data.dates.map(d => {
+                    const parts = d.split('-');
+                    return `${parts[1]}/${parts[2]}`;
+                });
+
+                const chartData = {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Alerts',
+                        data: data.counts,
+                        backgroundColor: '#3fb950',
+                        borderRadius: 4,
+                    }]
+                };
+
+                const config = {
+                    type: 'bar',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: '#21262d',
+                                borderColor: '#30363d',
+                                borderWidth: 1,
+                            }
+                        },
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: 'rgba(48, 54, 61, 0.5)' },
+                                ticks: { stepSize: 1 }
+                            }
+                        }
+                    }
+                };
+
+                if (alertsChart) {
+                    alertsChart.data = chartData;
+                    alertsChart.update('none');
+                } else {
+                    alertsChart = new Chart(canvas, config);
+                }
+            } catch (e) {
+                console.error('Alerts chart fetch error:', e);
+            }
+        }
+
+        async function fetchNearMissChart() {
+            try {
+                const resp = await fetch('/api/charts/daily-near-miss?days=7');
+                const data = await resp.json();
+
+                const canvas = document.getElementById('near-miss-chart');
+                const emptyMsg = document.getElementById('near-miss-chart-empty');
+
+                if (data.count === 0) {
+                    canvas.style.display = 'none';
+                    emptyMsg.style.display = 'flex';
+                    return;
+                }
+
+                canvas.style.display = 'block';
+                emptyMsg.style.display = 'none';
+
+                // Format dates for display (MM/DD)
+                const labels = data.dates.map(d => {
+                    const parts = d.split('-');
+                    return `${parts[1]}/${parts[2]}`;
+                });
+
+                const chartData = {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Near-Miss',
+                        data: data.counts,
+                        backgroundColor: '#d29922',
+                        borderRadius: 4,
+                    }]
+                };
+
+                const config = {
+                    type: 'bar',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: '#21262d',
+                                borderColor: '#30363d',
+                                borderWidth: 1,
+                            }
+                        },
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: 'rgba(48, 54, 61, 0.5)' },
+                                ticks: { stepSize: 1 }
+                            }
+                        }
+                    }
+                };
+
+                if (nearMissChart) {
+                    nearMissChart.data = chartData;
+                    nearMissChart.update('none');
+                } else {
+                    nearMissChart = new Chart(canvas, config);
+                }
+            } catch (e) {
+                console.error('Near-miss chart fetch error:', e);
+            }
+        }
+
         async function fetchDailyChart() {
             try {
                 const resp = await fetch('/api/charts/daily-executions?days=30');
@@ -1869,6 +2037,8 @@
         fetchPositions();
         fetchRedeemedHistory();
         fetchHourlyCharts();
+        fetchAlertsChart();
+        fetchNearMissChart();
         fetchDailyChart();
 
         // Refresh intervals
@@ -1882,6 +2052,8 @@
         setInterval(fetchPositions, 30000);  // Positions every 30s
         setInterval(() => fetchRedeemedHistory(false), 60000);  // Redeemed history every 60s
         setInterval(fetchHourlyCharts, 5000);  // Hourly charts with status updates
+        setInterval(fetchAlertsChart, 30000);  // Alerts chart every 30s
+        setInterval(fetchNearMissChart, 30000);  // Near-miss chart every 30s
         setInterval(fetchDailyChart, 60000);  // Daily chart every minute
 
         addLogLine('info', 'Live updates enabled');

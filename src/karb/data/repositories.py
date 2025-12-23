@@ -200,6 +200,25 @@ class AlertRepository:
             row = await cursor.fetchone()
             return row["count"] if row else 0
 
+    @staticmethod
+    async def get_daily_counts(days: int = 7) -> list[dict[str, Any]]:
+        """Get daily alert counts for charts."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT
+                    DATE(timestamp) as date,
+                    COUNT(*) as count
+                FROM alerts
+                WHERE timestamp >= DATE('now', ? || ' days')
+                GROUP BY DATE(timestamp)
+                ORDER BY date ASC
+                """,
+                (f"-{days}",),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
 
 class ExecutionRepository:
     """Repository for order executions."""
@@ -737,3 +756,22 @@ class NearMissAlertRepository:
             cursor = await conn.execute("SELECT COUNT(*) as count FROM near_miss_alerts")
             row = await cursor.fetchone()
             return row["count"] if row else 0
+
+    @staticmethod
+    async def get_daily_counts(days: int = 7) -> list[dict[str, Any]]:
+        """Get daily near-miss alert counts for charts."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT
+                    DATE(timestamp) as date,
+                    COUNT(*) as count
+                FROM near_miss_alerts
+                WHERE timestamp >= DATE('now', ? || ' days')
+                GROUP BY DATE(timestamp)
+                ORDER BY date ASC
+                """,
+                (f"-{days}",),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]

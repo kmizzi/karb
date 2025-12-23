@@ -506,6 +506,34 @@ def create_app() -> FastAPI:
             "count": len(data),
         }
 
+    @app.get("/api/charts/daily-alerts")
+    async def get_daily_alerts_chart_data(
+        days: int = 7,
+        username: str = Depends(verify_credentials),
+    ):
+        """Get daily arbitrage alert counts for charting."""
+        data = await AlertRepository.get_daily_counts(days=days)
+        return {
+            "dates": [d.get("date", "") for d in data],
+            "counts": [d.get("count", 0) for d in data],
+            "count": len(data),
+        }
+
+    @app.get("/api/charts/daily-near-miss")
+    async def get_daily_near_miss_chart_data(
+        days: int = 7,
+        username: str = Depends(verify_credentials),
+    ):
+        """Get daily near-miss alert counts for charting."""
+        from karb.data.repositories import NearMissAlertRepository
+
+        data = await NearMissAlertRepository.get_daily_counts(days=days)
+        return {
+            "dates": [d.get("date", "") for d in data],
+            "counts": [d.get("count", 0) for d in data],
+            "count": len(data),
+        }
+
     return app
 
 
