@@ -862,7 +862,7 @@
                             <tbody>
                                 ${data.trades.map(t => `
                                     <tr>
-                                        <td>${new Date(t.timestamp).toLocaleTimeString()}</td>
+                                        <td>${new Date(t.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
                                         <td>${t.market}</td>
                                         <td>${t.side}</td>
                                         <td>$${t.price.toFixed(3)}</td>
@@ -938,7 +938,7 @@
                                     <td>$${o.price.toFixed(3)}</td>
                                     <td>${o.size}</td>
                                     <td><span style="color: var(--accent-yellow);">${o.status}</span></td>
-                                    <td>${new Date(o.created_at).toLocaleTimeString()}</td>
+                                    <td>${new Date(o.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -967,7 +967,7 @@
                                     : 'var(--accent-red)';
                                 return `
                                 <tr>
-                                    <td>${new Date(e.timestamp).toLocaleTimeString()}</td>
+                                    <td>${new Date(e.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
                                     <td>${e.market}</td>
                                     <td>
                                         <span style="color: ${e.yes_order.status === 'filled' ? 'var(--accent-green)' : e.yes_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
