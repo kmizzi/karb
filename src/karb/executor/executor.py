@@ -1113,45 +1113,41 @@ class OrderExecutor:
                 status=no_result.status.value,
             )
 
-        # If orders were submitted but not immediately filled, wait and monitor
-        yes_needs_monitoring = yes_result.status == ExecutionStatus.SUBMITTED and yes_result.order_id
-        no_needs_monitoring = no_result.status == ExecutionStatus.SUBMITTED and no_result.order_id
+        # FOK orders should resolve immediately - if status is SUBMITTED (live/delayed),
+        # that's unexpected for FOK. Cancel immediately instead of waiting 10 seconds.
+        yes_unexpected_fok = yes_result.status == ExecutionStatus.SUBMITTED and yes_result.order_id
+        no_unexpected_fok = no_result.status == ExecutionStatus.SUBMITTED and no_result.order_id
 
-        if yes_needs_monitoring or no_needs_monitoring:
-            log.info(
-                "Orders submitted, waiting for fills",
-                yes_order_id=yes_result.order_id[:20] if yes_result.order_id else None,
-                no_order_id=no_result.order_id[:20] if no_result.order_id else None,
+        if yes_unexpected_fok or no_unexpected_fok:
+            log.warning(
+                "FOK orders returned unexpected 'live' status - cancelling immediately",
+                yes_status=yes_result.status.value if yes_result.order_id else None,
+                no_status=no_result.status.value if no_result.order_id else None,
             )
 
-            # Wait for orders to fill (with timeout and auto-cancellation)
-            yes_final_status, no_final_status = await self._wait_for_fills(
-                yes_result.order_id if yes_needs_monitoring else None,
-                no_result.order_id if no_needs_monitoring else None,
-            )
-
-            # Update results based on final status
-            if yes_needs_monitoring and yes_final_status:
-                status_str = yes_final_status.get("status", "").lower()
-                if status_str in ("filled", "matched"):
-                    yes_result.status = ExecutionStatus.FILLED
-                    yes_result.filled_size = opportunity.max_trade_size
-                    self._update_order_status(yes_result.order_id, "filled", float(opportunity.max_trade_size))
-                elif status_str in ("cancelled", "canceled"):
+            # Cancel any orders that are unexpectedly live (shouldn't happen with FOK)
+            async_client = self._async_client
+            if yes_unexpected_fok and yes_result.order_id:
+                try:
+                    if async_client:
+                        await async_client.cancel_order(yes_result.order_id)
+                    log.info("Cancelled unexpected live YES order", order_id=yes_result.order_id[:20])
                     yes_result.status = ExecutionStatus.CANCELLED
                     yes_result.filled_size = Decimal("0")
                     self._update_order_status(yes_result.order_id, "cancelled", 0)
+                except Exception as e:
+                    log.error("Failed to cancel YES order", error=str(e))
 
-            if no_needs_monitoring and no_final_status:
-                status_str = no_final_status.get("status", "").lower()
-                if status_str in ("filled", "matched"):
-                    no_result.status = ExecutionStatus.FILLED
-                    no_result.filled_size = opportunity.max_trade_size
-                    self._update_order_status(no_result.order_id, "filled", float(opportunity.max_trade_size))
-                elif status_str in ("cancelled", "canceled"):
+            if no_unexpected_fok and no_result.order_id:
+                try:
+                    if async_client:
+                        await async_client.cancel_order(no_result.order_id)
+                    log.info("Cancelled unexpected live NO order", order_id=no_result.order_id[:20])
                     no_result.status = ExecutionStatus.CANCELLED
                     no_result.filled_size = Decimal("0")
                     self._update_order_status(no_result.order_id, "cancelled", 0)
+                except Exception as e:
+                    log.error("Failed to cancel NO order", error=str(e))
 
         # Determine overall status
         if yes_result.status == ExecutionStatus.FILLED and no_result.status == ExecutionStatus.FILLED:
@@ -1277,14 +1273,26 @@ class OrderExecutor:
 
         if isinstance(response, dict):
             # Check for error
-            if "error" in response or "message" in response:
+            error_msg = response.get("error") or response.get("errorMsg") or response.get("message") or ""
+            if error_msg:
+                # FOK orders that can't fill return a specific error - treat as CANCELLED not FAILED
+                if "FOK" in error_msg.upper() or "NOT_FILLED" in error_msg.upper():
+                    log.info("FOK order not filled - cancelled", error=error_msg)
+                    return OrderResult(
+                        token_id=token_id,
+                        side=side,
+                        price=price,
+                        size=size,
+                        status=ExecutionStatus.CANCELLED,
+                        error=error_msg,
+                    )
                 return OrderResult(
                     token_id=token_id,
                     side=side,
                     price=price,
                     size=size,
                     status=ExecutionStatus.FAILED,
-                    error=response.get("error") or response.get("message"),
+                    error=error_msg,
                 )
 
             # Parse success response
