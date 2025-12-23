@@ -1253,13 +1253,25 @@ class OrderExecutor:
             order_id = response.get("orderID") or response.get("id")
             status_str = response.get("status", "").lower()
 
+            log.info(
+                "Order API response",
+                order_id=order_id[:20] if order_id else None,
+                status=status_str,
+                raw_response=str(response)[:200],
+            )
+
             if status_str in ("filled", "matched"):
                 status = ExecutionStatus.FILLED
                 filled_size = size
             elif status_str in ("open", "live", "pending"):
                 status = ExecutionStatus.SUBMITTED
                 filled_size = Decimal("0")
+            elif status_str in ("canceled", "cancelled", "not_matched", "expired"):
+                # FOK order that couldn't be filled
+                status = ExecutionStatus.CANCELLED
+                filled_size = Decimal("0")
             else:
+                log.warning("Unknown order status", status=status_str)
                 status = ExecutionStatus.SUBMITTED
                 filled_size = Decimal("0")
 
