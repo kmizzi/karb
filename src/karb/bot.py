@@ -262,6 +262,24 @@ class RealtimeArbitrageBot:
         self.stats.opportunities_found += 1
 
         # Convert alert to opportunity
+        # Limit trade size to available liquidity on BOTH sides
+        max_position = Decimal(str(settings.max_position_size))
+        available_size = min(alert.yes_size_available, alert.no_size_available)
+
+        # Skip if insufficient liquidity on either side
+        min_required_size = Decimal("10")  # Minimum $10 trade
+        if available_size < min_required_size:
+            log.warning(
+                "Skipping arbitrage - insufficient liquidity",
+                market=alert.market.question[:40],
+                yes_available=float(alert.yes_size_available),
+                no_available=float(alert.no_size_available),
+                min_required=float(min_required_size),
+            )
+            return
+
+        trade_size = min(available_size, max_position)
+
         opportunity = ArbitrageOpportunity(
             market=alert.market,
             yes_ask=alert.yes_ask,
@@ -270,7 +288,15 @@ class RealtimeArbitrageBot:
             profit_pct=alert.profit_pct,
             yes_size_available=alert.yes_size_available,
             no_size_available=alert.no_size_available,
-            max_trade_size=Decimal(str(settings.max_position_size)),
+            max_trade_size=trade_size,
+        )
+
+        log.info(
+            "Executing with liquidity-adjusted size",
+            market=alert.market.question[:40],
+            trade_size=float(trade_size),
+            yes_liquidity=float(alert.yes_size_available),
+            no_liquidity=float(alert.no_size_available),
         )
 
         # Execute immediately (with lock to prevent concurrent executions)
