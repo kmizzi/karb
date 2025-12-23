@@ -792,10 +792,11 @@
                             resolveStr = `${alert.days_until_resolution} days`;
                         }
 
-                        // Format alert timestamp in PST
+                        // Format alert timestamp in PST (assume UTC if no timezone)
                         let alertTime = '';
                         if (alert.timestamp) {
-                            const ts = new Date(alert.timestamp);
+                            const tsStr = alert.timestamp.endsWith('Z') || alert.timestamp.includes('+') ? alert.timestamp : alert.timestamp + 'Z';
+                            const ts = new Date(tsStr);
                             alertTime = ts.toLocaleTimeString('en-US', {
                                 hour: 'numeric',
                                 minute: '2-digit',
@@ -862,7 +863,7 @@
                             <tbody>
                                 ${data.trades.map(t => `
                                     <tr>
-                                        <td>${new Date(t.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
+                                        <td>${new Date(t.timestamp.endsWith('Z') ? t.timestamp : t.timestamp + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
                                         <td>${t.market}</td>
                                         <td>${t.side}</td>
                                         <td>$${t.price.toFixed(3)}</td>
@@ -938,7 +939,7 @@
                                     <td>$${o.price.toFixed(3)}</td>
                                     <td>${o.size}</td>
                                     <td><span style="color: var(--accent-yellow);">${o.status}</span></td>
-                                    <td>${new Date(o.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
+                                    <td>${new Date(o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -967,7 +968,7 @@
                                     : 'var(--accent-red)';
                                 return `
                                 <tr>
-                                    <td>${new Date(e.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
+                                    <td>${new Date(e.timestamp.endsWith('Z') ? e.timestamp : e.timestamp + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' })}</td>
                                     <td>${e.market}</td>
                                     <td>
                                         <span style="color: ${e.yes_order.status === 'filled' ? 'var(--accent-green)' : e.yes_order.status === 'cancelled' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
