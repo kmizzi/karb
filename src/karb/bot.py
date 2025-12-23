@@ -232,6 +232,9 @@ class RealtimeArbitrageBot:
     instead of polling.
     """
 
+    # How often to check for redeemable positions (in seconds)
+    REDEMPTION_CHECK_INTERVAL = 300  # 5 minutes
+
     def __init__(self) -> None:
         from karb.scanner.realtime_scanner import RealtimeScanner
 
@@ -246,6 +249,7 @@ class RealtimeArbitrageBot:
         self.stats = BotStats()
         self._running = False
         self._execution_lock = asyncio.Lock()
+        self._redemption_task: Optional[asyncio.Task] = None
 
     async def _on_arbitrage(self, alert) -> None:
         """Handle arbitrage alert from scanner."""
@@ -292,6 +296,49 @@ class RealtimeArbitrageBot:
                     error=str(e),
                 )
 
+    async def _auto_redemption_loop(self) -> None:
+        """Background task that periodically checks for and redeems resolved positions."""
+        from karb.executor.redemption import check_and_redeem
+
+        settings = get_settings()
+
+        # Wait a bit before first check to let the bot stabilize
+        await asyncio.sleep(60)
+
+        log.info("Auto-redemption task started", interval=f"{self.REDEMPTION_CHECK_INTERVAL}s")
+
+        while self._running:
+            try:
+                result = await check_and_redeem()
+
+                if result.get("skipped"):
+                    log.debug("Redemption skipped", reason=result.get("reason"))
+                elif result.get("redeemed", 0) > 0:
+                    log.info(
+                        "Auto-redemption completed",
+                        redeemed=result["redeemed"],
+                        total_value=f"${result.get('total_value', 0):.2f}",
+                    )
+
+                    # Send notification for successful redemptions
+                    try:
+                        notifier = get_notifier()
+                        await notifier.send_message(
+                            f"💰 Auto-redeemed {result['redeemed']} position(s) "
+                            f"for ${result.get('total_value', 0):.2f}"
+                        )
+                    except Exception:
+                        pass
+
+                elif result.get("error"):
+                    log.error("Auto-redemption error", error=result["error"])
+
+            except Exception as e:
+                log.error("Auto-redemption task error", error=str(e))
+
+            # Wait for next check
+            await asyncio.sleep(self.REDEMPTION_CHECK_INTERVAL)
+
     async def run(self) -> None:
         """Run the real-time bot."""
         settings = get_settings()
@@ -317,6 +364,11 @@ class RealtimeArbitrageBot:
         except Exception as e:
             log.debug("Startup notification failed", error=str(e))
 
+        # Start auto-redemption background task
+        if not settings.dry_run:
+            self._redemption_task = asyncio.create_task(self._auto_redemption_loop())
+            log.info("Auto-redemption task scheduled")
+
         try:
             await self.scanner.run()
         except asyncio.CancelledError:
@@ -334,6 +386,15 @@ class RealtimeArbitrageBot:
         """Clean shutdown."""
         log.info("Shutting down...")
         self.stop()
+
+        # Cancel auto-redemption task
+        if self._redemption_task and not self._redemption_task.done():
+            self._redemption_task.cancel()
+            try:
+                await self._redemption_task
+            except asyncio.CancelledError:
+                pass
+            log.info("Auto-redemption task cancelled")
 
         # Send shutdown notification
         try:
