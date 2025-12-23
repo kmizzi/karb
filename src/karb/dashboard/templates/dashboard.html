@@ -796,6 +796,9 @@
         const activityFeed = document.getElementById('activity-feed');
         let lastPriceUpdates = 0;
 
+        // Track which timing rows are expanded (persists across re-renders)
+        const expandedTimingRows = new Set();
+
         // Helper function to format timestamps properly
         function formatDateTime(timestamp) {
             if (!timestamp) return '-';
@@ -1368,7 +1371,8 @@
                                 <th>Time</th>
                                 <th>Market</th>
                                 <th>Arb %</th>
-                                <th>Liquidity</th>
+                                <th>YES Liq</th>
+                                <th>NO Liq</th>
                                 <th>YES Order</th>
                                 <th>NO Order</th>
                                 <th>Status</th>
@@ -1401,13 +1405,15 @@
 
                                 // Format arb profit %
                                 const arbPct = e.profit_pct ? `+${(e.profit_pct * 100).toFixed(2)}%` : '-';
-                                // Format liquidity (sum of both sides available)
-                                const liquidity = e.market_liquidity ? `$${e.market_liquidity.toLocaleString(undefined, {maximumFractionDigits: 0})}` : '-';
+                                // Format liquidity for each side (use separate values, fallback to combined/2)
+                                const yesLiq = e.yes_liquidity ? `$${e.yes_liquidity.toLocaleString(undefined, {maximumFractionDigits: 0})}` : (e.market_liquidity ? `$${(e.market_liquidity/2).toLocaleString(undefined, {maximumFractionDigits: 0})}` : '-');
+                                const noLiq = e.no_liquidity ? `$${e.no_liquidity.toLocaleString(undefined, {maximumFractionDigits: 0})}` : (e.market_liquidity ? `$${(e.market_liquidity/2).toLocaleString(undefined, {maximumFractionDigits: 0})}` : '-');
 
                                 // Format timing info
                                 const timing = e.timing;
                                 let latencyDisplay = '-';
                                 let timingDetails = '';
+                                const isExpanded = expandedTimingRows.has(idx);
                                 if (timing && timing.deltas) {
                                     const totalMs = timing.deltas.total_execute_ms || timing.deltas.total_latency_ms;
                                     if (totalMs) {
@@ -1416,8 +1422,8 @@
                                     // Build timing breakdown for expandable row
                                     const deltas = timing.deltas;
                                     timingDetails = `
-                                        <tr class="timing-details" id="timing-${idx}" style="display: none; background: var(--bg-tertiary);">
-                                            <td colspan="9" style="padding: 8px 16px;">
+                                        <tr class="timing-details" id="timing-${idx}" style="display: ${isExpanded ? 'table-row' : 'none'}; background: var(--bg-tertiary);">
+                                            <td colspan="10" style="padding: 8px 16px;">
                                                 <div style="display: flex; gap: 24px; flex-wrap: wrap; font-size: 11px;">
                                                     ${deltas.detection_to_execute_ms !== undefined ? `<span>📡 Detection→Execute: <b>${Math.round(deltas.detection_to_execute_ms)}ms</b></span>` : ''}
                                                     ${deltas.order_signing_ms !== undefined ? `<span>✍️ Order Signing+Submit: <b>${Math.round(deltas.order_signing_ms)}ms</b></span>` : ''}
@@ -1435,7 +1441,8 @@
                                     <td>${formatDateTime(e.timestamp)}</td>
                                     <td>${e.market}</td>
                                     <td style="color: var(--accent-green); font-weight: 600;">${arbPct}</td>
-                                    <td style="color: var(--text-secondary);">${liquidity}</td>
+                                    <td style="color: var(--accent-green);">${yesLiq}</td>
+                                    <td style="color: var(--accent-red);">${noLiq}</td>
                                     <td>
                                         <span style="color: ${e.yes_order.status === 'filled' ? 'var(--accent-green)' : e.yes_order.status === 'submitted' ? 'var(--accent-blue)' : 'var(--accent-red)'};">
                                             ${e.yes_order.status}
@@ -1451,7 +1458,7 @@
                                         ${noError}
                                     </td>
                                     <td><span style="color: ${statusColor}; font-weight: 600;">${displayStatus}</span></td>
-                                    <td style="color: var(--accent-blue); font-weight: 500;">${latencyDisplay}${timing ? ' ▼' : ''}</td>
+                                    <td style="color: var(--accent-blue); font-weight: 500;">${latencyDisplay}${timing ? (isExpanded ? ' ▲' : ' ▼') : ''}</td>
                                     <td>$${e.total_cost.toFixed(2)}</td>
                                 </tr>
                                 ${timingDetails}
@@ -1630,7 +1637,14 @@
         function toggleTimingRow(idx) {
             const row = document.getElementById(`timing-${idx}`);
             if (row) {
-                row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+                const isHidden = row.style.display === 'none';
+                row.style.display = isHidden ? 'table-row' : 'none';
+                // Track state for re-renders
+                if (isHidden) {
+                    expandedTimingRows.add(idx);
+                } else {
+                    expandedTimingRows.delete(idx);
+                }
             }
         }
 

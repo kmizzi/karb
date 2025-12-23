@@ -320,6 +320,9 @@ def _get_migrations() -> list[str]:
         # Add baseline columns for daily stats calculation
         "ALTER TABLE scanner_stats ADD COLUMN price_updates_baseline INTEGER DEFAULT 0",
         "ALTER TABLE scanner_stats ADD COLUMN arbitrage_alerts_baseline INTEGER DEFAULT 0",
+        # Add separate YES/NO liquidity columns to executions
+        "ALTER TABLE executions ADD COLUMN yes_liquidity REAL",
+        "ALTER TABLE executions ADD COLUMN no_liquidity REAL",
     ]
 
 

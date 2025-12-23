@@ -804,8 +804,11 @@ class OrderExecutor:
         """Save execution record to database asynchronously."""
         try:
             opp = result.opportunity
-            # Calculate total market liquidity (sum of both sides)
-            market_liquidity = float(opp.yes_size_available) + float(opp.no_size_available)
+            # Store individual liquidity values for each side
+            yes_liquidity = float(opp.yes_size_available)
+            no_liquidity = float(opp.no_size_available)
+            # Also keep combined for backward compatibility
+            market_liquidity = yes_liquidity + no_liquidity
             # Serialize timing data to JSON
             timing_data = json.dumps(result.timing.to_dict()) if result.timing else None
 
@@ -830,6 +833,8 @@ class OrderExecutor:
                 profit_pct=float(opp.profit_pct),
                 market_liquidity=market_liquidity,
                 timing_data=timing_data,
+                yes_liquidity=yes_liquidity,
+                no_liquidity=no_liquidity,
             )
         except Exception as e:
             log.debug("Failed to save execution to database", error=str(e))

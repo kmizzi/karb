@@ -454,6 +454,8 @@ def create_app() -> FastAPI:
                 "expected_profit": float(e.get("expected_profit", 0) or 0),
                 "profit_pct": float(e.get("profit_pct", 0) or 0),
                 "market_liquidity": float(e.get("market_liquidity", 0) or 0),
+                "yes_liquidity": float(e.get("yes_liquidity", 0) or 0),
+                "no_liquidity": float(e.get("no_liquidity", 0) or 0),
                 "timing": timing,
             })
 

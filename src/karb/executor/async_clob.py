@@ -264,16 +264,25 @@ class AsyncClobClient:
         This is the CPU-intensive part - consider running in executor for parallelization.
         """
         # Calculate amounts (6 decimals for USDC)
+        # IMPORTANT: Polymarket requires specific precision:
+        # - maker_amount: max 2 decimal places (divisible by 10000 after 1e6 scaling)
+        # - taker_amount: max 4 decimal places (divisible by 100 after 1e6 scaling)
+        # Use round() before int() to avoid floating-point precision errors
         side_int = 0 if side == "BUY" else 1
 
         if side == "BUY":
             # Buying tokens: maker_amount = USDC, taker_amount = tokens
-            taker_amount = int(size * 1e6)  # tokens (6 decimals)
-            maker_amount = int(size * price * 1e6)  # USDC
+            # Round USDC to 2 decimals, tokens to 4 decimals
+            taker_amount_raw = round(size * 1e6)
+            taker_amount = (taker_amount_raw // 100) * 100  # Ensure 4 decimal precision
+            maker_amount_raw = round(size * price * 1e6)
+            maker_amount = (maker_amount_raw // 10000) * 10000  # Ensure 2 decimal precision
         else:
             # Selling tokens: maker_amount = tokens, taker_amount = USDC
-            maker_amount = int(size * 1e6)  # tokens
-            taker_amount = int(size * price * 1e6)  # USDC
+            maker_amount_raw = round(size * 1e6)
+            maker_amount = (maker_amount_raw // 100) * 100  # Ensure 4 decimal precision
+            taker_amount_raw = round(size * price * 1e6)
+            taker_amount = (taker_amount_raw // 10000) * 10000  # Ensure 2 decimal precision
 
         # Generate unique salt (matching py_clob_client's approach)
         import random
