@@ -658,17 +658,31 @@
             </div>
         </div>
 
-        <!-- Closed Positions History -->
+        <!-- Pending Redemption (closed but not yet redeemed) -->
         <div class="card" style="margin-top: 24px;">
             <div class="card-header">
-                <span class="card-title">Closed Positions History</span>
-                <span id="closed-history-count" class="refresh-indicator">-</span>
+                <span class="card-title">Pending Redemption</span>
+                <span id="pending-redemption-count" class="refresh-indicator">-</span>
             </div>
-            <div class="table-container" id="closed-history-container">
+            <div class="table-container" id="pending-redemption-container">
+                <div class="empty-state">Loading...</div>
+            </div>
+            <div id="pending-redemption-pagination" style="margin-top: 12px; text-align: center; display: none;">
+                <button class="btn" id="pending-redemption-load-more">Load More</button>
+            </div>
+        </div>
+
+        <!-- Redeemed Positions History -->
+        <div class="card" style="margin-top: 24px;">
+            <div class="card-header">
+                <span class="card-title">Redeemed Positions</span>
+                <span id="redeemed-history-count" class="refresh-indicator">-</span>
+            </div>
+            <div class="table-container" id="redeemed-history-container">
                 <div class="empty-state">Loading history...</div>
             </div>
-            <div id="closed-history-pagination" style="margin-top: 12px; text-align: center; display: none;">
-                <button class="btn" id="closed-history-load-more">Load More</button>
+            <div id="redeemed-history-pagination" style="margin-top: 12px; text-align: center; display: none;">
+                <button class="btn" id="redeemed-history-load-more">Load More</button>
             </div>
         </div>
     </div>
@@ -1220,91 +1234,125 @@
             }
         }
 
-        // Closed positions history
-        let closedHistoryOffset = 0;
-        let closedHistoryTotal = 0;
-        let allClosedHistory = [];
+        // Pending redemption (not yet redeemed)
+        let pendingRedemptionOffset = 0;
+        let allPendingRedemption = [];
 
-        async function fetchClosedHistory(loadMore = false) {
+        async function fetchPendingRedemption(loadMore = false) {
             try {
                 if (!loadMore) {
-                    closedHistoryOffset = 0;
-                    allClosedHistory = [];
+                    pendingRedemptionOffset = 0;
+                    allPendingRedemption = [];
                 }
 
-                const resp = await fetch(`/api/closed-positions?limit=20&offset=${closedHistoryOffset}`);
+                const resp = await fetch(`/api/closed-positions?limit=20&offset=${pendingRedemptionOffset}&redeemed=false`);
                 const data = await resp.json();
-                closedHistoryTotal = data.total || 0;
 
-                // Update count display
-                document.getElementById('closed-history-count').textContent = `${closedHistoryTotal} total`;
+                document.getElementById('pending-redemption-count').textContent = `${data.total || 0} pending`;
 
-                // Append or replace
                 if (loadMore) {
-                    allClosedHistory = [...allClosedHistory, ...data.positions];
+                    allPendingRedemption = [...allPendingRedemption, ...data.positions];
                 } else {
-                    allClosedHistory = data.positions;
+                    allPendingRedemption = data.positions;
                 }
-                closedHistoryOffset += data.count;
+                pendingRedemptionOffset += data.count;
 
-                // Show/hide load more button
-                const pagination = document.getElementById('closed-history-pagination');
-                if (data.has_more) {
-                    pagination.style.display = 'block';
-                } else {
-                    pagination.style.display = 'none';
-                }
+                const pagination = document.getElementById('pending-redemption-pagination');
+                pagination.style.display = data.has_more ? 'block' : 'none';
 
-                if (allClosedHistory.length === 0) {
-                    document.getElementById('closed-history-container').innerHTML = `
-                        <div class="empty-state">No closed positions recorded yet</div>
+                if (allPendingRedemption.length === 0) {
+                    document.getElementById('pending-redemption-container').innerHTML = `
+                        <div class="empty-state">No positions pending redemption</div>
                     `;
                 } else {
-                    document.getElementById('closed-history-container').innerHTML = `
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Market</th>
-                                    <th>Outcome</th>
-                                    <th>Size</th>
-                                    <th>Cost</th>
-                                    <th>Value</th>
-                                    <th>P&L</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${allClosedHistory.map(p => {
-                                    const pnlColor = p.realized_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
-                                    const pnlSign = p.realized_pnl >= 0 ? '+' : '';
-                                    const statusIcon = p.status === 'WON' ? '✓' : p.status === 'LOST' ? '✗' : '-';
-                                    const statusColor = p.status === 'WON' ? 'var(--accent-green)' : p.status === 'LOST' ? 'var(--accent-red)' : 'var(--text-secondary)';
-                                    return `
-                                    <tr>
-                                        <td>${formatDateTime(p.timestamp)}</td>
-                                        <td>${p.market || '-'}</td>
-                                        <td><span style="color: ${p.outcome === 'Yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${p.outcome || '-'}</span></td>
-                                        <td>${p.size.toFixed(0)}</td>
-                                        <td>$${p.cost_basis.toFixed(2)}</td>
-                                        <td>$${p.realized_value.toFixed(2)}</td>
-                                        <td style="color: ${pnlColor}; font-weight: 600;">${pnlSign}$${p.realized_pnl.toFixed(2)}</td>
-                                        <td><span style="color: ${statusColor};">${statusIcon} ${p.status}${p.redeemed ? ' 💰' : ''}</span></td>
-                                    </tr>
-                                `}).join('')}
-                            </tbody>
-                        </table>
-                    `;
+                    document.getElementById('pending-redemption-container').innerHTML = renderClosedPositionsTable(allPendingRedemption);
                 }
             } catch (e) {
-                console.error('Closed history fetch error:', e);
+                console.error('Pending redemption fetch error:', e);
             }
+        }
+
+        // Redeemed positions history
+        let redeemedHistoryOffset = 0;
+        let allRedeemedHistory = [];
+
+        async function fetchRedeemedHistory(loadMore = false) {
+            try {
+                if (!loadMore) {
+                    redeemedHistoryOffset = 0;
+                    allRedeemedHistory = [];
+                }
+
+                const resp = await fetch(`/api/closed-positions?limit=20&offset=${redeemedHistoryOffset}&redeemed=true`);
+                const data = await resp.json();
+
+                document.getElementById('redeemed-history-count').textContent = `${data.total || 0} redeemed`;
+
+                if (loadMore) {
+                    allRedeemedHistory = [...allRedeemedHistory, ...data.positions];
+                } else {
+                    allRedeemedHistory = data.positions;
+                }
+                redeemedHistoryOffset += data.count;
+
+                const pagination = document.getElementById('redeemed-history-pagination');
+                pagination.style.display = data.has_more ? 'block' : 'none';
+
+                if (allRedeemedHistory.length === 0) {
+                    document.getElementById('redeemed-history-container').innerHTML = `
+                        <div class="empty-state">No redeemed positions yet</div>
+                    `;
+                } else {
+                    document.getElementById('redeemed-history-container').innerHTML = renderClosedPositionsTable(allRedeemedHistory);
+                }
+            } catch (e) {
+                console.error('Redeemed history fetch error:', e);
+            }
+        }
+
+        function renderClosedPositionsTable(positions) {
+            return `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Market</th>
+                            <th>Outcome</th>
+                            <th>Size</th>
+                            <th>Cost</th>
+                            <th>Value</th>
+                            <th>P&L</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${positions.map(p => {
+                            const pnlColor = p.realized_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                            const pnlSign = p.realized_pnl >= 0 ? '+' : '';
+                            const statusIcon = p.status === 'WON' ? '✓' : p.status === 'LOST' ? '✗' : '-';
+                            const statusColor = p.status === 'WON' ? 'var(--accent-green)' : p.status === 'LOST' ? 'var(--accent-red)' : 'var(--text-secondary)';
+                            return `
+                            <tr>
+                                <td>${formatDateTime(p.timestamp)}</td>
+                                <td>${p.market || '-'}</td>
+                                <td><span style="color: ${p.outcome === 'Yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${p.outcome || '-'}</span></td>
+                                <td>${p.size.toFixed(0)}</td>
+                                <td>$${p.cost_basis.toFixed(2)}</td>
+                                <td>$${p.realized_value.toFixed(2)}</td>
+                                <td style="color: ${pnlColor}; font-weight: 600;">${pnlSign}$${p.realized_pnl.toFixed(2)}</td>
+                                <td><span style="color: ${statusColor};">${statusIcon} ${p.status}${p.redeemed ? ' 💰' : ''}</span></td>
+                            </tr>
+                        `}).join('')}
+                    </tbody>
+                </table>
+            `;
         }
 
         // Event listeners for load more buttons
         document.getElementById('alerts-load-more').addEventListener('click', () => fetchAlerts(true));
         document.getElementById('trades-load-more').addEventListener('click', () => fetchTrades(true));
-        document.getElementById('closed-history-load-more').addEventListener('click', () => fetchClosedHistory(true));
+        document.getElementById('pending-redemption-load-more').addEventListener('click', () => fetchPendingRedemption(true));
+        document.getElementById('redeemed-history-load-more').addEventListener('click', () => fetchRedeemedHistory(true));
 
         // Initial load
         addLogLine('info', 'Dashboard initialized');
@@ -1315,7 +1363,8 @@
         fetchTrades();
         fetchOrders();
         fetchPositions();
-        fetchClosedHistory();
+        fetchPendingRedemption();
+        fetchRedeemedHistory();
 
         // Refresh intervals
         setInterval(fetchStatus, 5000);      // Status every 5s
@@ -1325,7 +1374,8 @@
         setInterval(() => fetchTrades(false), 30000);     // Trades every 30s
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
         setInterval(fetchPositions, 30000);  // Positions every 30s
-        setInterval(() => fetchClosedHistory(false), 60000);  // Closed history every 60s
+        setInterval(() => fetchPendingRedemption(false), 60000);  // Pending redemption every 60s
+        setInterval(() => fetchRedeemedHistory(false), 60000);    // Redeemed history every 60s
 
         addLogLine('info', 'Live updates enabled');
     </script>

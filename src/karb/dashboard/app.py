@@ -220,11 +220,14 @@ def create_app() -> FastAPI:
     async def get_closed_positions(
         limit: int = 20,
         offset: int = 0,
+        redeemed: Optional[bool] = None,
         username: str = Depends(verify_credentials),
     ):
         """Get closed positions history from database with pagination."""
-        positions = await ClosedPositionRepository.get_recent(limit=limit, offset=offset)
-        total = await ClosedPositionRepository.get_total_count()
+        positions = await ClosedPositionRepository.get_recent(
+            limit=limit, offset=offset, redeemed=redeemed
+        )
+        total = await ClosedPositionRepository.get_total_count(redeemed=redeemed)
         return {
             "positions": [
                 {

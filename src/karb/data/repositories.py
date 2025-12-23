@@ -467,21 +467,37 @@ class ClosedPositionRepository:
             return row is not None
 
     @staticmethod
-    async def get_recent(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
-        """Get recent closed positions with pagination."""
+    async def get_recent(
+        limit: int = 50,
+        offset: int = 0,
+        redeemed: Optional[bool] = None,
+    ) -> list[dict[str, Any]]:
+        """Get recent closed positions with pagination and optional redeemed filter."""
         async with get_async_db() as conn:
-            cursor = await conn.execute(
-                "SELECT * FROM closed_positions ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                (limit, offset),
-            )
+            if redeemed is not None:
+                cursor = await conn.execute(
+                    "SELECT * FROM closed_positions WHERE redeemed = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                    (1 if redeemed else 0, limit, offset),
+                )
+            else:
+                cursor = await conn.execute(
+                    "SELECT * FROM closed_positions ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                    (limit, offset),
+                )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
     @staticmethod
-    async def get_total_count() -> int:
-        """Get total count of closed positions."""
+    async def get_total_count(redeemed: Optional[bool] = None) -> int:
+        """Get total count of closed positions with optional redeemed filter."""
         async with get_async_db() as conn:
-            cursor = await conn.execute("SELECT COUNT(*) as count FROM closed_positions")
+            if redeemed is not None:
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) as count FROM closed_positions WHERE redeemed = ?",
+                    (1 if redeemed else 0,),
+                )
+            else:
+                cursor = await conn.execute("SELECT COUNT(*) as count FROM closed_positions")
             row = await cursor.fetchone()
             return row["count"] if row else 0
 
