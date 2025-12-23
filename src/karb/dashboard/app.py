@@ -495,7 +495,8 @@ def create_app() -> FastAPI:
         username: str = Depends(verify_credentials),
     ):
         """Get minute-level price updates for real-time charting."""
-        data = await MinuteStatsRepository.get_recent_with_current(minutes=minutes)
+        # Use get_recent (recorded deltas) not get_recent_with_current (which mixes cumulative)
+        data = await MinuteStatsRepository.get_recent(minutes=minutes)
         return {
             "minutes": [d.get("minute", "") for d in data],
             "price_updates": [d.get("price_updates", 0) for d in data],
