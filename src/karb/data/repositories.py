@@ -856,9 +856,11 @@ class MinuteStatsRepository:
     async def get_recent(minutes: int = 60) -> list[dict[str, Any]]:
         """Get recent minute stats for charting."""
         async with get_async_db() as conn:
+            # Filter out anomalous values (>20k/min suggests cumulative bug)
             cursor = await conn.execute(
                 """
                 SELECT * FROM price_updates_minute
+                WHERE price_updates < 20000
                 ORDER BY minute DESC
                 LIMIT ?
                 """,
