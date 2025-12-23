@@ -354,7 +354,8 @@ class AsyncClobClient:
         body_str = json.dumps(body, separators=(",", ":"))
         headers = self._get_l2_headers("DELETE", path, body_str)
 
-        response = await self._client.delete(
+        response = await self._client.request(
+            "DELETE",
             f"{self.host}{path}",
             headers=headers,
             content=body_str,
