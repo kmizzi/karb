@@ -276,7 +276,8 @@ class RealtimeArbitrageBot:
         async_client = await self.executor._ensure_async_client()
         if async_client:
             log.info("Pre-caching neg_risk status for all tokens", count=len(token_ids))
-            await async_client.prefetch_neg_risk(token_ids)
+            # Run pre-fetch in background to not block WebSocket setup
+            asyncio.create_task(async_client.prefetch_neg_risk(token_ids))
         else:
             log.warning("Async CLOB client not available - skipping neg_risk pre-cache")
 
