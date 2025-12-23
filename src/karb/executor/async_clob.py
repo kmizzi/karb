@@ -72,6 +72,8 @@ class SignedOrder:
 
     def to_dict(self) -> dict:
         """Convert to API payload format."""
+        # Side must be string "BUY" or "SELL", not integer
+        side_str = "BUY" if self.side == 0 else "SELL"
         return {
             "salt": str(self.salt),
             "maker": self.maker,
@@ -83,7 +85,7 @@ class SignedOrder:
             "expiration": str(self.expiration),
             "nonce": str(self.nonce),
             "feeRateBps": str(self.fee_rate_bps),
-            "side": self.side,
+            "side": side_str,
             "signatureType": self.signature_type,
             "signature": self.signature,
         }
