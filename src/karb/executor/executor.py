@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from karb.api.models import ArbitrageOpportunity
 from karb.config import get_settings
-from karb.data.repositories import ExecutionRepository
+from karb.data.repositories import ClosedPositionRepository, ExecutionRepository
 from karb.executor.async_clob import AsyncClobClient, create_async_clob_client
 
 # Order monitoring settings
@@ -514,14 +514,38 @@ class OrderExecutor:
             )
 
             status = response.get("status", "").lower()
-            if status in ("filled", "matched"):
-                loss = (buy_price - unwind_price) * size
+            if status in ("filled", "matched", "delayed", "live"):
+                # For GTC orders, "live" or "delayed" means submitted - check if it filled
+                actual_exit_price = unwind_price
+                loss = (buy_price - actual_exit_price) * size
+                cost_basis = buy_price * size
+                realized_value = actual_exit_price * size
+
                 log.info(
                     "Unwind successful",
                     token_id=token_id[:16],
                     status=status,
                     loss=f"${loss:.2f}",
                 )
+
+                # Record closed position in database
+                try:
+                    asyncio.create_task(ClosedPositionRepository.insert(
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        market_title=market_name[:100],
+                        outcome="unknown",  # We don't have YES/NO info here
+                        token_id=token_id,
+                        size=size,
+                        avg_price=buy_price,
+                        exit_price=actual_exit_price,
+                        cost_basis=cost_basis,
+                        realized_value=realized_value,
+                        realized_pnl=-loss,
+                        status="SOLD",
+                        redeemed=False,
+                    ))
+                except Exception as e:
+                    log.debug("Failed to record closed position", error=str(e))
 
                 # Send notification about unwind
                 try:
