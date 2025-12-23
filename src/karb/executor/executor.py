@@ -839,8 +839,8 @@ class OrderExecutor:
         opp = result.opportunity
         timestamp = result.timestamp.isoformat()
 
-        # Log YES order if it was submitted
-        if result.yes_order.status in (ExecutionStatus.FILLED, ExecutionStatus.SUBMITTED):
+        # Only log trades that were actually FILLED (not just submitted)
+        if result.yes_order.status == ExecutionStatus.FILLED:
             self._trade_log.log_trade(Trade(
                 timestamp=timestamp,
                 platform="polymarket",
@@ -856,8 +856,8 @@ class OrderExecutor:
                 profit_expected=float(opp.expected_profit_usd) / 2,  # Split between both orders
             ))
 
-        # Log NO order if it was submitted
-        if result.no_order.status in (ExecutionStatus.FILLED, ExecutionStatus.SUBMITTED):
+        # Only log trades that were actually FILLED
+        if result.no_order.status == ExecutionStatus.FILLED:
             self._trade_log.log_trade(Trade(
                 timestamp=timestamp,
                 platform="polymarket",
