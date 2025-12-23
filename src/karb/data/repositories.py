@@ -524,6 +524,121 @@ class ClosedPositionRepository:
             return dict(row) if row else {}
 
 
+class StatsHistoryRepository:
+    """Repository for historical stats (hourly snapshots for charting)."""
+
+    MAX_HOURS = 168  # Keep last 7 days of hourly data
+
+    @staticmethod
+    async def insert(
+        timestamp: str,
+        hour: str,
+        markets: int = 0,
+        price_updates: int = 0,
+        arbitrage_alerts: int = 0,
+        executions_attempted: int = 0,
+        executions_filled: int = 0,
+        ws_connected: bool = True,
+    ) -> int:
+        """Insert a new hourly stats snapshot."""
+        async with get_async_db() as conn:
+            # Check if we already have an entry for this hour
+            cursor = await conn.execute(
+                "SELECT id FROM stats_history WHERE hour = ?",
+                (hour,),
+            )
+            existing = await cursor.fetchone()
+
+            if existing:
+                # Update existing entry
+                await conn.execute(
+                    """
+                    UPDATE stats_history SET
+                        timestamp = ?,
+                        markets = ?,
+                        price_updates = price_updates + ?,
+                        arbitrage_alerts = arbitrage_alerts + ?,
+                        executions_attempted = executions_attempted + ?,
+                        executions_filled = executions_filled + ?,
+                        ws_connected = ?
+                    WHERE hour = ?
+                    """,
+                    (
+                        timestamp, markets, price_updates, arbitrage_alerts,
+                        executions_attempted, executions_filled,
+                        1 if ws_connected else 0, hour
+                    ),
+                )
+                return existing["id"]
+            else:
+                # Insert new entry
+                cursor = await conn.execute(
+                    """
+                    INSERT INTO stats_history (
+                        timestamp, hour, markets, price_updates, arbitrage_alerts,
+                        executions_attempted, executions_filled, ws_connected
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        timestamp, hour, markets, price_updates, arbitrage_alerts,
+                        executions_attempted, executions_filled, 1 if ws_connected else 0
+                    ),
+                )
+                new_id = cursor.lastrowid or 0
+
+                # Cleanup old entries (keep last MAX_HOURS)
+                await conn.execute(
+                    """
+                    DELETE FROM stats_history WHERE id NOT IN (
+                        SELECT id FROM stats_history ORDER BY hour DESC LIMIT ?
+                    )
+                    """,
+                    (StatsHistoryRepository.MAX_HOURS,),
+                )
+
+                return new_id
+
+    @staticmethod
+    async def get_hourly(hours: int = 24) -> list[dict[str, Any]]:
+        """Get hourly stats for the last N hours (for charts)."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM stats_history
+                ORDER BY hour DESC
+                LIMIT ?
+                """,
+                (hours,),
+            )
+            rows = await cursor.fetchall()
+            # Return in chronological order
+            return [dict(row) for row in reversed(rows)]
+
+    @staticmethod
+    async def get_daily_executions(days: int = 30) -> list[dict[str, Any]]:
+        """Get daily execution stats from the executions table."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT
+                    DATE(timestamp) as date,
+                    COUNT(*) as total_executions,
+                    SUM(CASE WHEN status = 'filled' THEN 1 ELSE 0 END) as filled,
+                    SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) as partial,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+                    SUM(total_cost) as total_volume,
+                    SUM(CASE WHEN status = 'filled' THEN expected_profit ELSE 0 END) as total_profit
+                FROM executions
+                WHERE timestamp >= DATE('now', ? || ' days')
+                GROUP BY DATE(timestamp)
+                ORDER BY date ASC
+                """,
+                (f"-{days}",),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
 class NearMissAlertRepository:
     """Repository for near-miss (illiquid) arbitrage alerts."""
 

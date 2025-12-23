@@ -16,6 +16,7 @@ from karb.data.repositories import (
     AlertRepository,
     ClosedPositionRepository,
     ExecutionRepository,
+    StatsHistoryRepository,
     StatsRepository,
     TradeRepository,
 )
@@ -469,6 +470,40 @@ def create_app() -> FastAPI:
                 "success_rate": stats.get("success_rate", 0),
             },
             "updated_at": datetime.now().isoformat(),
+        }
+
+    @app.get("/api/charts/hourly")
+    async def get_hourly_chart_data(
+        hours: int = 24,
+        username: str = Depends(verify_credentials),
+    ):
+        """Get hourly stats for charting (price updates, market count)."""
+        data = await StatsHistoryRepository.get_hourly(hours=hours)
+        return {
+            "hours": [d.get("hour", "") for d in data],
+            "price_updates": [d.get("price_updates", 0) for d in data],
+            "markets": [d.get("markets", 0) for d in data],
+            "arbitrage_alerts": [d.get("arbitrage_alerts", 0) for d in data],
+            "ws_connected": [bool(d.get("ws_connected", 0)) for d in data],
+            "count": len(data),
+        }
+
+    @app.get("/api/charts/daily-executions")
+    async def get_daily_executions_chart_data(
+        days: int = 30,
+        username: str = Depends(verify_credentials),
+    ):
+        """Get daily execution stats for charting."""
+        data = await StatsHistoryRepository.get_daily_executions(days=days)
+        return {
+            "dates": [d.get("date", "") for d in data],
+            "total_executions": [d.get("total_executions", 0) for d in data],
+            "filled": [d.get("filled", 0) for d in data],
+            "partial": [d.get("partial", 0) for d in data],
+            "failed": [d.get("failed", 0) for d in data],
+            "total_volume": [float(d.get("total_volume", 0) or 0) for d in data],
+            "total_profit": [float(d.get("total_profit", 0) or 0) for d in data],
+            "count": len(data),
         }
 
     return app

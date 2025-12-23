@@ -234,6 +234,8 @@ class RealtimeArbitrageBot:
 
     # How often to check for redeemable positions (in seconds)
     REDEMPTION_CHECK_INTERVAL = 300  # 5 minutes
+    # How often to record stats history (in seconds)
+    STATS_HISTORY_INTERVAL = 3600  # 1 hour
 
     def __init__(self) -> None:
         from karb.scanner.realtime_scanner import RealtimeScanner
@@ -253,6 +255,8 @@ class RealtimeArbitrageBot:
         self._running = False
         self._execution_lock = asyncio.Lock()
         self._redemption_task: Optional[asyncio.Task] = None
+        self._stats_history_task: Optional[asyncio.Task] = None
+        self._last_price_updates: int = 0  # Track delta for hourly stats
 
     async def _on_markets_loaded(self, markets: list) -> None:
         """
@@ -420,6 +424,55 @@ class RealtimeArbitrageBot:
             # Wait for next check
             await asyncio.sleep(self.REDEMPTION_CHECK_INTERVAL)
 
+    async def _stats_history_loop(self) -> None:
+        """Background task that records hourly stats snapshots for charting."""
+        from datetime import datetime, timezone
+        from karb.data.repositories import StatsHistoryRepository
+
+        # Wait a bit before first record
+        await asyncio.sleep(60)
+
+        log.info("Stats history task started", interval=f"{self.STATS_HISTORY_INTERVAL}s")
+
+        while self._running:
+            try:
+                # Get current scanner stats
+                scanner_stats = self.scanner.get_stats()
+                current_price_updates = scanner_stats.get("price_updates", 0)
+
+                # Calculate delta since last record
+                price_updates_delta = current_price_updates - self._last_price_updates
+                self._last_price_updates = current_price_updates
+
+                # Get current hour for grouping
+                now = datetime.now(timezone.utc)
+                hour = now.strftime("%Y-%m-%d %H:00")
+
+                # Record stats (non-blocking)
+                asyncio.create_task(StatsHistoryRepository.insert(
+                    timestamp=now.isoformat(),
+                    hour=hour,
+                    markets=scanner_stats.get("markets", 0),
+                    price_updates=price_updates_delta,
+                    arbitrage_alerts=self.stats.opportunities_found,
+                    executions_attempted=self.stats.trades_executed,
+                    executions_filled=self.stats.trades_successful,
+                    ws_connected=scanner_stats.get("ws_connected", False),
+                ))
+
+                log.debug(
+                    "Stats history recorded",
+                    hour=hour,
+                    price_updates=price_updates_delta,
+                    markets=scanner_stats.get("markets", 0),
+                )
+
+            except Exception as e:
+                log.error("Stats history task error", error=str(e))
+
+            # Wait for next record
+            await asyncio.sleep(self.STATS_HISTORY_INTERVAL)
+
     async def run(self) -> None:
         """Run the real-time bot."""
         settings = get_settings()
@@ -445,10 +498,14 @@ class RealtimeArbitrageBot:
         except Exception as e:
             log.debug("Startup notification failed", error=str(e))
 
-        # Start auto-redemption background task
+        # Start background tasks
         if not settings.dry_run:
             self._redemption_task = asyncio.create_task(self._auto_redemption_loop())
             log.info("Auto-redemption task scheduled")
+
+        # Always start stats history task (for monitoring)
+        self._stats_history_task = asyncio.create_task(self._stats_history_loop())
+        log.info("Stats history task scheduled")
 
         try:
             await self.scanner.run()
@@ -468,7 +525,7 @@ class RealtimeArbitrageBot:
         log.info("Shutting down...")
         self.stop()
 
-        # Cancel auto-redemption task
+        # Cancel background tasks
         if self._redemption_task and not self._redemption_task.done():
             self._redemption_task.cancel()
             try:
@@ -476,6 +533,14 @@ class RealtimeArbitrageBot:
             except asyncio.CancelledError:
                 pass
             log.info("Auto-redemption task cancelled")
+
+        if self._stats_history_task and not self._stats_history_task.done():
+            self._stats_history_task.cancel()
+            try:
+                await self._stats_history_task
+            except asyncio.CancelledError:
+                pass
+            log.info("Stats history task cancelled")
 
         # Send shutdown notification
         try:

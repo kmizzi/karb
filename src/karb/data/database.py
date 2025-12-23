@@ -264,6 +264,19 @@ CREATE TABLE IF NOT EXISTS near_miss_alerts (
     reason TEXT DEFAULT 'insufficient_liquidity'
 );
 
+-- Stats history for charting (hourly snapshots)
+CREATE TABLE IF NOT EXISTS stats_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    hour TEXT NOT NULL,
+    markets INTEGER DEFAULT 0,
+    price_updates INTEGER DEFAULT 0,
+    arbitrage_alerts INTEGER DEFAULT 0,
+    executions_attempted INTEGER DEFAULT 0,
+    executions_filled INTEGER DEFAULT 0,
+    ws_connected INTEGER DEFAULT 0
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_platform ON trades(platform);
@@ -272,6 +285,7 @@ CREATE INDEX IF NOT EXISTS idx_executions_timestamp ON executions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON portfolio_snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_closed_positions_timestamp ON closed_positions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_near_miss_alerts_timestamp ON near_miss_alerts(timestamp);
+CREATE INDEX IF NOT EXISTS idx_stats_history_hour ON stats_history(hour);
 """
 
 

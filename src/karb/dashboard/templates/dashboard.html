@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Karb Dashboard</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --bg-primary: #0d1117;
@@ -488,6 +489,33 @@
             .stat-value { font-size: 24px; }
             .terminal-body { height: 200px; }
         }
+
+        /* Charts Section */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 1000px) {
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+
+        .chart-container {
+            position: relative;
+            height: 250px;
+            width: 100%;
+        }
+
+        .chart-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -573,6 +601,37 @@
                 </div>
             </div>
 
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-grid">
+            <!-- Hourly Activity Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">📊 Hourly Activity (Last 24h)</span>
+                    <span class="refresh-indicator">Live</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="hourly-chart"></canvas>
+                </div>
+                <div id="hourly-chart-empty" class="chart-empty" style="display: none;">
+                    No hourly data yet. Data will appear after the bot runs for at least 1 hour.
+                </div>
+            </div>
+
+            <!-- Daily Executions Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">📈 Daily Executions (Last 30d)</span>
+                    <span class="refresh-indicator">Live</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="daily-chart"></canvas>
+                </div>
+                <div id="daily-chart-empty" class="chart-empty" style="display: none;">
+                    No execution data yet. Charts will populate when trades are executed.
+                </div>
+            </div>
         </div>
 
         <!-- Live Activity Feed -->
@@ -1537,6 +1596,228 @@
         document.getElementById('redeemed-history-load-more').addEventListener('click', () => fetchRedeemedHistory(true));
         document.getElementById('near-miss-load-more').addEventListener('click', () => fetchNearMissAlerts(true));
 
+        // Chart instances
+        let hourlyChart = null;
+        let dailyChart = null;
+
+        // Chart.js default configuration for dark theme
+        Chart.defaults.color = '#8b949e';
+        Chart.defaults.borderColor = '#30363d';
+
+        async function fetchHourlyChart() {
+            try {
+                const resp = await fetch('/api/charts/hourly?hours=24');
+                const data = await resp.json();
+
+                const canvas = document.getElementById('hourly-chart');
+                const emptyMsg = document.getElementById('hourly-chart-empty');
+
+                if (data.count === 0) {
+                    canvas.style.display = 'none';
+                    emptyMsg.style.display = 'flex';
+                    return;
+                }
+
+                canvas.style.display = 'block';
+                emptyMsg.style.display = 'none';
+
+                // Format hours for display (just HH:00)
+                const labels = data.hours.map(h => {
+                    const parts = h.split(' ');
+                    return parts[1] || h;
+                });
+
+                const chartData = {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Price Updates',
+                            data: data.price_updates,
+                            borderColor: '#58a6ff',
+                            backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            yAxisID: 'y',
+                        },
+                        {
+                            label: 'Markets',
+                            data: data.markets,
+                            borderColor: '#3fb950',
+                            backgroundColor: 'transparent',
+                            borderDash: [5, 5],
+                            tension: 0.3,
+                            yAxisID: 'y1',
+                        }
+                    ]
+                };
+
+                const config = {
+                    type: 'line',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: {
+                                    usePointStyle: true,
+                                    padding: 20,
+                                }
+                            },
+                            tooltip: {
+                                backgroundColor: '#21262d',
+                                borderColor: '#30363d',
+                                borderWidth: 1,
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: {
+                                    display: false,
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Price Updates'
+                                },
+                                grid: {
+                                    color: 'rgba(48, 54, 61, 0.5)',
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Markets'
+                                },
+                                grid: {
+                                    drawOnChartArea: false,
+                                },
+                            },
+                        }
+                    },
+                };
+
+                if (hourlyChart) {
+                    hourlyChart.data = chartData;
+                    hourlyChart.update('none');
+                } else {
+                    hourlyChart = new Chart(canvas, config);
+                }
+            } catch (e) {
+                console.error('Hourly chart fetch error:', e);
+            }
+        }
+
+        async function fetchDailyChart() {
+            try {
+                const resp = await fetch('/api/charts/daily-executions?days=30');
+                const data = await resp.json();
+
+                const canvas = document.getElementById('daily-chart');
+                const emptyMsg = document.getElementById('daily-chart-empty');
+
+                if (data.count === 0) {
+                    canvas.style.display = 'none';
+                    emptyMsg.style.display = 'flex';
+                    return;
+                }
+
+                canvas.style.display = 'block';
+                emptyMsg.style.display = 'none';
+
+                // Format dates for display (MM/DD)
+                const labels = data.dates.map(d => {
+                    const parts = d.split('-');
+                    return `${parts[1]}/${parts[2]}`;
+                });
+
+                const chartData = {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Filled',
+                            data: data.filled,
+                            backgroundColor: '#3fb950',
+                            borderRadius: 4,
+                        },
+                        {
+                            label: 'Partial',
+                            data: data.partial,
+                            backgroundColor: '#d29922',
+                            borderRadius: 4,
+                        },
+                        {
+                            label: 'Failed',
+                            data: data.failed,
+                            backgroundColor: '#f85149',
+                            borderRadius: 4,
+                        }
+                    ]
+                };
+
+                const config = {
+                    type: 'bar',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: {
+                                    usePointStyle: true,
+                                    padding: 20,
+                                }
+                            },
+                            tooltip: {
+                                backgroundColor: '#21262d',
+                                borderColor: '#30363d',
+                                borderWidth: 1,
+                            }
+                        },
+                        scales: {
+                            x: {
+                                stacked: true,
+                                grid: {
+                                    display: false,
+                                }
+                            },
+                            y: {
+                                stacked: true,
+                                grid: {
+                                    color: 'rgba(48, 54, 61, 0.5)',
+                                },
+                                ticks: {
+                                    stepSize: 1,
+                                }
+                            }
+                        }
+                    },
+                };
+
+                if (dailyChart) {
+                    dailyChart.data = chartData;
+                    dailyChart.update('none');
+                } else {
+                    dailyChart = new Chart(canvas, config);
+                }
+            } catch (e) {
+                console.error('Daily chart fetch error:', e);
+            }
+        }
+
         // Initial load
         addLogLine('info', 'Dashboard initialized');
         fetchStatus();
@@ -1548,6 +1829,8 @@
         fetchOrders();
         fetchPositions();
         fetchRedeemedHistory();
+        fetchHourlyChart();
+        fetchDailyChart();
 
         // Refresh intervals
         setInterval(fetchStatus, 5000);      // Status every 5s
@@ -1559,6 +1842,8 @@
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
         setInterval(fetchPositions, 30000);  // Positions every 30s
         setInterval(() => fetchRedeemedHistory(false), 60000);  // Redeemed history every 60s
+        setInterval(fetchHourlyChart, 300000);  // Charts every 5 minutes
+        setInterval(fetchDailyChart, 300000);
 
         addLogLine('info', 'Live updates enabled');
     </script>
