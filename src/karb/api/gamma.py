@@ -1,6 +1,7 @@
 """Gamma API client for market discovery."""
 
 import json
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -206,6 +207,26 @@ class GammaClient:
                 )
                 return None
 
+            # Parse end_date from various possible field names
+            end_date = None
+            end_date_raw = (
+                data.get("endDate")
+                or data.get("end_date_iso")
+                or data.get("end_date")
+                or data.get("resolutionDate")
+                or data.get("resolution_date")
+            )
+            if end_date_raw:
+                try:
+                    # Handle various ISO formats
+                    if isinstance(end_date_raw, str):
+                        # Remove trailing Z and add UTC timezone if needed
+                        if end_date_raw.endswith("Z"):
+                            end_date_raw = end_date_raw[:-1] + "+00:00"
+                        end_date = datetime.fromisoformat(end_date_raw)
+                except (ValueError, TypeError) as e:
+                    log.debug("Failed to parse end_date", raw=end_date_raw, error=str(e))
+
             return Market(
                 id=str(data.get("id", "")),
                 condition_id=str(data.get("conditionId", data.get("condition_id", ""))),
@@ -217,6 +238,7 @@ class GammaClient:
                 liquidity=Decimal(str(data.get("liquidity", "0") or "0")),
                 active=data.get("active", True),
                 closed=data.get("closed", False),
+                end_date=end_date,
             )
 
         except (KeyError, ValueError, TypeError) as e:

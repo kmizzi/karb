@@ -584,7 +584,7 @@ class RealtimeScanner:
                 "no_ask": float(alert.no_ask),
                 "combined": float(alert.combined_cost),
                 "profit": float(alert.profit_pct),
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "platform": "polymarket",
                 "days_until_resolution": days_until,
                 "resolution_date": resolution_date,
