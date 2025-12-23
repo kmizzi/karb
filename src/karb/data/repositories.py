@@ -599,8 +599,12 @@ class StatsHistoryRepository:
                 return new_id
 
     @staticmethod
-    async def get_hourly(hours: int = 24) -> list[dict[str, Any]]:
-        """Get hourly stats for the last N hours (for charts)."""
+    async def get_hourly(hours: int = 24, include_current: bool = True) -> list[dict[str, Any]]:
+        """Get hourly stats for the last N hours (for charts).
+
+        If include_current is True, appends the current scanner_stats as
+        the most recent data point for live updates.
+        """
         async with get_async_db() as conn:
             cursor = await conn.execute(
                 """
@@ -611,8 +615,38 @@ class StatsHistoryRepository:
                 (hours,),
             )
             rows = await cursor.fetchall()
-            # Return in chronological order
-            return [dict(row) for row in reversed(rows)]
+            result = [dict(row) for row in reversed(rows)]
+
+            # Include current live stats as the latest data point
+            if include_current:
+                cursor = await conn.execute(
+                    "SELECT * FROM scanner_stats WHERE id = 1"
+                )
+                current = await cursor.fetchone()
+                if current:
+                    from datetime import datetime, timezone
+                    now = datetime.now(timezone.utc)
+                    current_hour = now.strftime("%Y-%m-%d %H:00")
+
+                    # Check if we already have this hour in history
+                    if result and result[-1].get("hour") == current_hour:
+                        # Update the last entry with current stats
+                        result[-1]["markets"] = current["markets"]
+                        result[-1]["price_updates"] = current["price_updates"]
+                        result[-1]["ws_connected"] = current["ws_connected"]
+                    else:
+                        # Add as new entry for current hour
+                        result.append({
+                            "hour": current_hour,
+                            "markets": current["markets"],
+                            "price_updates": current["price_updates"],
+                            "arbitrage_alerts": 0,
+                            "executions_attempted": 0,
+                            "executions_filled": 0,
+                            "ws_connected": current["ws_connected"],
+                        })
+
+            return result
 
     @staticmethod
     async def get_daily_executions(days: int = 30) -> list[dict[str, Any]]:

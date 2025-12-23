@@ -1621,10 +1621,15 @@
                 canvas.style.display = 'block';
                 emptyMsg.style.display = 'none';
 
-                // Format hours for display (just HH:00)
+                // Format hours for display in PST
                 const labels = data.hours.map(h => {
-                    const parts = h.split(' ');
-                    return parts[1] || h;
+                    // Parse UTC hour string (YYYY-MM-DD HH:00)
+                    const date = new Date(h.replace(' ', 'T') + ':00:00Z');
+                    return date.toLocaleTimeString('en-US', {
+                        hour: 'numeric',
+                        hour12: true,
+                        timeZone: 'America/Los_Angeles'
+                    });
                 });
 
                 const chartData = {
@@ -1842,8 +1847,8 @@
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
         setInterval(fetchPositions, 30000);  // Positions every 30s
         setInterval(() => fetchRedeemedHistory(false), 60000);  // Redeemed history every 60s
-        setInterval(fetchHourlyChart, 300000);  // Charts every 5 minutes
-        setInterval(fetchDailyChart, 300000);
+        setInterval(fetchHourlyChart, 5000);  // Hourly chart with status updates
+        setInterval(fetchDailyChart, 60000);  // Daily chart every minute
 
         addLogLine('info', 'Live updates enabled');
     </script>
