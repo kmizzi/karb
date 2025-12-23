@@ -692,6 +692,94 @@ class StatsHistoryRepository:
             return [dict(row) for row in rows]
 
 
+class MinuteStatsRepository:
+    """Repository for minute-level price update stats (for real-time charting)."""
+
+    MAX_MINUTES = 120  # Keep last 2 hours of minute data
+
+    @staticmethod
+    async def insert(
+        timestamp: str,
+        minute: str,
+        price_updates: int = 0,
+        ws_connected: bool = True,
+    ) -> int:
+        """Insert or update minute stats."""
+        async with get_async_db() as conn:
+            # Upsert: insert or replace
+            cursor = await conn.execute(
+                """
+                INSERT INTO price_updates_minute (timestamp, minute, price_updates, ws_connected)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(minute) DO UPDATE SET
+                    timestamp = excluded.timestamp,
+                    price_updates = excluded.price_updates,
+                    ws_connected = excluded.ws_connected
+                """,
+                (timestamp, minute, price_updates, 1 if ws_connected else 0),
+            )
+            minute_id = cursor.lastrowid or 0
+
+            # Cleanup old entries (keep last MAX_MINUTES)
+            await conn.execute(
+                """
+                DELETE FROM price_updates_minute WHERE id NOT IN (
+                    SELECT id FROM price_updates_minute ORDER BY minute DESC LIMIT ?
+                )
+                """,
+                (MinuteStatsRepository.MAX_MINUTES,),
+            )
+
+            return minute_id
+
+    @staticmethod
+    async def get_recent(minutes: int = 60) -> list[dict[str, Any]]:
+        """Get recent minute stats for charting."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM price_updates_minute
+                ORDER BY minute DESC
+                LIMIT ?
+                """,
+                (minutes,),
+            )
+            rows = await cursor.fetchall()
+            # Return in chronological order
+            return [dict(row) for row in reversed(rows)]
+
+    @staticmethod
+    async def get_recent_with_current(minutes: int = 60) -> list[dict[str, Any]]:
+        """Get recent minute stats including current live stats as latest point."""
+        result = await MinuteStatsRepository.get_recent(minutes)
+
+        # Add current scanner stats as the latest data point
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                "SELECT * FROM scanner_stats WHERE id = 1"
+            )
+            current = await cursor.fetchone()
+            if current:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                current_minute = now.strftime("%Y-%m-%d %H:%M")
+
+                # Check if we already have this minute
+                if result and result[-1].get("minute") == current_minute:
+                    # Update the last entry with current live stats
+                    result[-1]["price_updates"] = current["price_updates"]
+                    result[-1]["ws_connected"] = current["ws_connected"]
+                else:
+                    # Add as new entry
+                    result.append({
+                        "minute": current_minute,
+                        "price_updates": current["price_updates"],
+                        "ws_connected": current["ws_connected"],
+                    })
+
+        return result
+
+
 class NearMissAlertRepository:
     """Repository for near-miss (illiquid) arbitrage alerts."""
 

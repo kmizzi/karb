@@ -236,6 +236,8 @@ class RealtimeArbitrageBot:
     REDEMPTION_CHECK_INTERVAL = 300  # 5 minutes
     # How often to record stats history (in seconds)
     STATS_HISTORY_INTERVAL = 3600  # 1 hour
+    # How often to record minute-level stats (in seconds)
+    MINUTE_STATS_INTERVAL = 60  # 1 minute
 
     def __init__(self) -> None:
         from karb.scanner.realtime_scanner import RealtimeScanner
@@ -256,7 +258,9 @@ class RealtimeArbitrageBot:
         self._execution_lock = asyncio.Lock()
         self._redemption_task: Optional[asyncio.Task] = None
         self._stats_history_task: Optional[asyncio.Task] = None
+        self._minute_stats_task: Optional[asyncio.Task] = None
         self._last_price_updates: int = 0  # Track delta for hourly stats
+        self._last_minute_price_updates: int = 0  # Track delta for minute stats
 
     async def _on_markets_loaded(self, markets: list) -> None:
         """
@@ -473,6 +477,44 @@ class RealtimeArbitrageBot:
             # Wait for next record
             await asyncio.sleep(self.STATS_HISTORY_INTERVAL)
 
+    async def _minute_stats_loop(self) -> None:
+        """Background task that records minute-level price update stats."""
+        from datetime import datetime, timezone
+        from karb.data.repositories import MinuteStatsRepository
+
+        # Wait a bit before first record
+        await asyncio.sleep(10)
+
+        log.info("Minute stats task started", interval=f"{self.MINUTE_STATS_INTERVAL}s")
+
+        while self._running:
+            try:
+                # Get current scanner stats
+                scanner_stats = self.scanner.get_stats()
+                current_price_updates = scanner_stats.get("price_updates", 0)
+
+                # Calculate delta since last minute
+                price_updates_delta = current_price_updates - self._last_minute_price_updates
+                self._last_minute_price_updates = current_price_updates
+
+                # Get current minute for grouping
+                now = datetime.now(timezone.utc)
+                minute = now.strftime("%Y-%m-%d %H:%M")
+
+                # Record stats (non-blocking)
+                asyncio.create_task(MinuteStatsRepository.insert(
+                    timestamp=now.isoformat(),
+                    minute=minute,
+                    price_updates=price_updates_delta,
+                    ws_connected=scanner_stats.get("ws_connected", False),
+                ))
+
+            except Exception as e:
+                log.error("Minute stats task error", error=str(e))
+
+            # Wait for next record
+            await asyncio.sleep(self.MINUTE_STATS_INTERVAL)
+
     async def run(self) -> None:
         """Run the real-time bot."""
         settings = get_settings()
@@ -506,6 +548,10 @@ class RealtimeArbitrageBot:
         # Always start stats history task (for monitoring)
         self._stats_history_task = asyncio.create_task(self._stats_history_loop())
         log.info("Stats history task scheduled")
+
+        # Start minute-level stats for real-time charting
+        self._minute_stats_task = asyncio.create_task(self._minute_stats_loop())
+        log.info("Minute stats task scheduled")
 
         try:
             await self.scanner.run()
@@ -541,6 +587,14 @@ class RealtimeArbitrageBot:
             except asyncio.CancelledError:
                 pass
             log.info("Stats history task cancelled")
+
+        if self._minute_stats_task and not self._minute_stats_task.done():
+            self._minute_stats_task.cancel()
+            try:
+                await self._minute_stats_task
+            except asyncio.CancelledError:
+                pass
+            log.info("Minute stats task cancelled")
 
         # Send shutdown notification
         try:

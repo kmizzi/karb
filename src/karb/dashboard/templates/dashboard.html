@@ -605,10 +605,10 @@
 
         <!-- Charts Section -->
         <div class="charts-grid">
-            <!-- Price Updates Chart -->
+            <!-- Price Updates Chart (minute-level) -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">📊 Price Updates (Last 24h)</span>
+                    <span class="card-title">📊 Price Updates (Last 60 min)</span>
                     <span class="refresh-indicator">Live</span>
                 </div>
                 <div class="chart-container">
@@ -1664,128 +1664,168 @@
             });
         }
 
-        async function fetchHourlyCharts() {
+        // Helper to format minute labels in PST
+        function formatMinuteLabel(m) {
+            // m is "YYYY-MM-DD HH:MM"
+            const isoString = m.replace(' ', 'T') + ':00Z';
+            const date = new Date(isoString);
+            if (isNaN(date.getTime())) {
+                const parts = m.split(' ');
+                return parts[1] || m;
+            }
+            return date.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true,
+                timeZone: 'America/Los_Angeles'
+            });
+        }
+
+        async function fetchPriceUpdatesChart() {
             try {
-                const resp = await fetch('/api/charts/hourly?hours=24');
+                const resp = await fetch('/api/charts/price-updates-minute?minutes=60');
                 const data = await resp.json();
 
-                const labels = data.hours.map(formatHourLabel);
-
-                // Price Updates Chart
                 const priceCanvas = document.getElementById('price-updates-chart');
                 const priceEmpty = document.getElementById('price-updates-chart-empty');
 
                 if (data.count === 0) {
                     priceCanvas.style.display = 'none';
                     priceEmpty.style.display = 'flex';
-                } else {
-                    priceCanvas.style.display = 'block';
-                    priceEmpty.style.display = 'none';
+                    return;
+                }
 
-                    const priceData = {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Price Updates',
-                            data: data.price_updates,
-                            borderColor: '#58a6ff',
-                            backgroundColor: 'rgba(88, 166, 255, 0.2)',
-                            fill: true,
-                            tension: 0.3,
-                            pointRadius: 2,
-                        }]
-                    };
+                priceCanvas.style.display = 'block';
+                priceEmpty.style.display = 'none';
 
-                    const priceConfig = {
-                        type: 'line',
-                        data: priceData,
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: {
-                                    backgroundColor: '#21262d',
-                                    borderColor: '#30363d',
-                                    borderWidth: 1,
-                                }
-                            },
-                            scales: {
-                                x: { grid: { display: false } },
-                                y: {
-                                    beginAtZero: true,
-                                    grid: { color: 'rgba(48, 54, 61, 0.5)' },
-                                    ticks: {
-                                        callback: (v) => v >= 1000 ? (v/1000).toFixed(0) + 'k' : v
+                // Only show every 5th label to avoid crowding
+                const labels = data.minutes.map((m, i) => {
+                    if (i % 10 === 0 || i === data.minutes.length - 1) {
+                        return formatMinuteLabel(m);
+                    }
+                    return '';
+                });
+
+                const priceData = {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Price Updates/min',
+                        data: data.price_updates,
+                        borderColor: '#58a6ff',
+                        backgroundColor: 'rgba(88, 166, 255, 0.2)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 1,
+                    }]
+                };
+
+                const priceConfig = {
+                    type: 'line',
+                    data: priceData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: '#21262d',
+                                borderColor: '#30363d',
+                                borderWidth: 1,
+                                callbacks: {
+                                    title: (items) => {
+                                        const idx = items[0].dataIndex;
+                                        return formatMinuteLabel(data.minutes[idx]);
                                     }
                                 }
                             }
+                        },
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: 'rgba(48, 54, 61, 0.5)' },
+                                ticks: {
+                                    callback: (v) => v >= 1000 ? (v/1000).toFixed(0) + 'k' : v
+                                }
+                            }
                         }
-                    };
-
-                    if (priceUpdatesChart) {
-                        priceUpdatesChart.data = priceData;
-                        priceUpdatesChart.update('none');
-                    } else {
-                        priceUpdatesChart = new Chart(priceCanvas, priceConfig);
                     }
-                }
+                };
 
-                // Markets Chart
+                if (priceUpdatesChart) {
+                    priceUpdatesChart.data = priceData;
+                    priceUpdatesChart.update('none');
+                } else {
+                    priceUpdatesChart = new Chart(priceCanvas, priceConfig);
+                }
+            } catch (e) {
+                console.error('Price updates chart fetch error:', e);
+            }
+        }
+
+        async function fetchMarketsChart() {
+            try {
+                const resp = await fetch('/api/charts/hourly?hours=24');
+                const data = await resp.json();
+
                 const marketsCanvas = document.getElementById('markets-chart');
                 const marketsEmpty = document.getElementById('markets-chart-empty');
 
                 if (data.count === 0) {
                     marketsCanvas.style.display = 'none';
                     marketsEmpty.style.display = 'flex';
-                } else {
-                    marketsCanvas.style.display = 'block';
-                    marketsEmpty.style.display = 'none';
+                    return;
+                }
 
-                    const marketsData = {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Markets',
-                            data: data.markets,
-                            borderColor: '#3fb950',
-                            backgroundColor: 'rgba(63, 185, 80, 0.2)',
-                            fill: true,
-                            tension: 0.3,
-                            pointRadius: 2,
-                        }]
-                    };
+                marketsCanvas.style.display = 'block';
+                marketsEmpty.style.display = 'none';
 
-                    const marketsConfig = {
-                        type: 'line',
-                        data: marketsData,
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: {
-                                    backgroundColor: '#21262d',
-                                    borderColor: '#30363d',
-                                    borderWidth: 1,
-                                }
-                            },
-                            scales: {
-                                x: { grid: { display: false } },
-                                y: {
-                                    grid: { color: 'rgba(48, 54, 61, 0.5)' },
-                                }
+                const labels = data.hours.map(formatHourLabel);
+
+                const marketsData = {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Markets',
+                        data: data.markets,
+                        borderColor: '#3fb950',
+                        backgroundColor: 'rgba(63, 185, 80, 0.2)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 2,
+                    }]
+                };
+
+                const marketsConfig = {
+                    type: 'line',
+                    data: marketsData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: '#21262d',
+                                borderColor: '#30363d',
+                                borderWidth: 1,
+                            }
+                        },
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: {
+                                grid: { color: 'rgba(48, 54, 61, 0.5)' },
                             }
                         }
-                    };
-
-                    if (marketsChart) {
-                        marketsChart.data = marketsData;
-                        marketsChart.update('none');
-                    } else {
-                        marketsChart = new Chart(marketsCanvas, marketsConfig);
                     }
+                };
+
+                if (marketsChart) {
+                    marketsChart.data = marketsData;
+                    marketsChart.update('none');
+                } else {
+                    marketsChart = new Chart(marketsCanvas, marketsConfig);
                 }
             } catch (e) {
-                console.error('Hourly charts fetch error:', e);
+                console.error('Markets chart fetch error:', e);
             }
         }
 
@@ -2036,7 +2076,8 @@
         fetchOrders();
         fetchPositions();
         fetchRedeemedHistory();
-        fetchHourlyCharts();
+        fetchPriceUpdatesChart();
+        fetchMarketsChart();
         fetchAlertsChart();
         fetchNearMissChart();
         fetchDailyChart();
@@ -2051,7 +2092,8 @@
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
         setInterval(fetchPositions, 30000);  // Positions every 30s
         setInterval(() => fetchRedeemedHistory(false), 60000);  // Redeemed history every 60s
-        setInterval(fetchHourlyCharts, 5000);  // Hourly charts with status updates
+        setInterval(fetchPriceUpdatesChart, 5000);  // Price updates every 5s (minute-level)
+        setInterval(fetchMarketsChart, 60000);  // Markets chart every minute (hourly data)
         setInterval(fetchAlertsChart, 30000);  // Alerts chart every 30s
         setInterval(fetchNearMissChart, 30000);  // Near-miss chart every 30s
         setInterval(fetchDailyChart, 60000);  // Daily chart every minute

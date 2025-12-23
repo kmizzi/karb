@@ -16,6 +16,7 @@ from karb.data.repositories import (
     AlertRepository,
     ClosedPositionRepository,
     ExecutionRepository,
+    MinuteStatsRepository,
     StatsHistoryRepository,
     StatsRepository,
     TradeRepository,
@@ -484,6 +485,20 @@ def create_app() -> FastAPI:
             "price_updates": [d.get("price_updates", 0) for d in data],
             "markets": [d.get("markets", 0) for d in data],
             "arbitrage_alerts": [d.get("arbitrage_alerts", 0) for d in data],
+            "ws_connected": [bool(d.get("ws_connected", 0)) for d in data],
+            "count": len(data),
+        }
+
+    @app.get("/api/charts/price-updates-minute")
+    async def get_price_updates_minute_chart_data(
+        minutes: int = 60,
+        username: str = Depends(verify_credentials),
+    ):
+        """Get minute-level price updates for real-time charting."""
+        data = await MinuteStatsRepository.get_recent_with_current(minutes=minutes)
+        return {
+            "minutes": [d.get("minute", "") for d in data],
+            "price_updates": [d.get("price_updates", 0) for d in data],
             "ws_connected": [bool(d.get("ws_connected", 0)) for d in data],
             "count": len(data),
         }

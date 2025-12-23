@@ -277,6 +277,15 @@ CREATE TABLE IF NOT EXISTS stats_history (
     ws_connected INTEGER DEFAULT 0
 );
 
+-- Minute-level price updates for real-time charting (rolling 60 min window)
+CREATE TABLE IF NOT EXISTS price_updates_minute (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    minute TEXT NOT NULL UNIQUE,
+    price_updates INTEGER DEFAULT 0,
+    ws_connected INTEGER DEFAULT 0
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_platform ON trades(platform);
@@ -286,6 +295,7 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON portfolio_snapshots(timest
 CREATE INDEX IF NOT EXISTS idx_closed_positions_timestamp ON closed_positions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_near_miss_alerts_timestamp ON near_miss_alerts(timestamp);
 CREATE INDEX IF NOT EXISTS idx_stats_history_hour ON stats_history(hour);
+CREATE INDEX IF NOT EXISTS idx_price_updates_minute ON price_updates_minute(minute);
 """
 
 
