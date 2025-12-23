@@ -675,6 +675,20 @@
             </div>
         </div>
 
+        <!-- Near-Miss Alerts Section -->
+        <div class="card" style="margin-top: 16px;">
+            <div class="card-header">
+                <span class="card-title">🚫 Near-Miss Opportunities (Illiquid)</span>
+                <span id="near-miss-count" class="refresh-indicator">Live</span>
+            </div>
+            <div id="near-miss-container">
+                <div class="empty-state">No illiquid opportunities detected yet</div>
+            </div>
+            <div id="near-miss-pagination" style="margin-top: 12px; text-align: center; display: none;">
+                <button class="btn" id="near-miss-load-more">Load More</button>
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -939,6 +953,87 @@
                 }
             } catch (e) {
                 console.error('Alerts fetch error:', e);
+            }
+        }
+
+        // Near-miss (illiquid) alerts
+        let nearMissOffset = 0;
+        let nearMissTotal = 0;
+        let allNearMissAlerts = [];
+
+        async function fetchNearMissAlerts(loadMore = false) {
+            try {
+                if (!loadMore) {
+                    nearMissOffset = 0;
+                    allNearMissAlerts = [];
+                }
+
+                const resp = await fetch(`/api/near-miss-alerts?limit=10&offset=${nearMissOffset}`);
+                const data = await resp.json();
+                nearMissTotal = data.total || 0;
+
+                // Update count display
+                document.getElementById('near-miss-count').textContent = `${nearMissTotal} total`;
+
+                // Append or replace alerts
+                if (loadMore) {
+                    allNearMissAlerts = [...allNearMissAlerts, ...data.alerts];
+                } else {
+                    allNearMissAlerts = data.alerts;
+                }
+                nearMissOffset += data.count;
+
+                // Show/hide load more button
+                const pagination = document.getElementById('near-miss-pagination');
+                if (data.has_more) {
+                    pagination.style.display = 'block';
+                } else {
+                    pagination.style.display = 'none';
+                }
+
+                if (allNearMissAlerts.length === 0) {
+                    document.getElementById('near-miss-container').innerHTML = `
+                        <div class="empty-state">No illiquid opportunities detected yet</div>
+                    `;
+                } else {
+                    document.getElementById('near-miss-container').innerHTML = allNearMissAlerts.slice().reverse().map(alert => {
+                        // Format timestamp in PST
+                        let alertTime = '';
+                        if (alert.timestamp) {
+                            const tsStr = alert.timestamp.endsWith('Z') || alert.timestamp.includes('+') ? alert.timestamp : alert.timestamp + 'Z';
+                            const ts = new Date(tsStr);
+                            alertTime = ts.toLocaleTimeString('en-US', {
+                                hour: 'numeric',
+                                minute: '2-digit',
+                                hour12: true,
+                                timeZone: 'America/Los_Angeles'
+                            }) + ' PST';
+                        }
+
+                        const minLiquidity = Math.min(alert.yes_liquidity, alert.no_liquidity);
+
+                        return `
+                        <div class="alert-item" style="border-left: 3px solid var(--accent-yellow);">
+                            <div class="alert-market">
+                                <span style="color: var(--accent-yellow); font-weight: bold; margin-right: 6px;">⚠️</span>
+                                ${alert.market || 'Unknown Market'}
+                            </div>
+                            <div class="alert-details">
+                                YES: $${(alert.yes_ask || 0).toFixed(4)} +
+                                NO: $${(alert.no_ask || 0).toFixed(4)} =
+                                $${(alert.combined || 0).toFixed(4)}
+                                <span class="alert-profit">+${((alert.profit_pct || 0) * 100).toFixed(2)}%</span>
+                            </div>
+                            <div class="alert-details" style="margin-top: 4px;">
+                                <span style="color: var(--accent-red);">Liquidity: $${minLiquidity.toFixed(2)} (need $${alert.min_required})</span>
+                                <span style="margin-left: 12px; color: #888;">YES: $${alert.yes_liquidity.toFixed(2)} | NO: $${alert.no_liquidity.toFixed(2)}</span>
+                                <span style="margin-left: 12px; color: #666;">Spotted: ${alertTime}</span>
+                            </div>
+                        </div>
+                    `}).join('');
+                }
+            } catch (e) {
+                console.error('Near-miss alerts fetch error:', e);
             }
         }
 
@@ -1440,6 +1535,7 @@
         document.getElementById('alerts-load-more').addEventListener('click', () => fetchAlerts(true));
         document.getElementById('trades-load-more').addEventListener('click', () => fetchTrades(true));
         document.getElementById('redeemed-history-load-more').addEventListener('click', () => fetchRedeemedHistory(true));
+        document.getElementById('near-miss-load-more').addEventListener('click', () => fetchNearMissAlerts(true));
 
         // Initial load
         addLogLine('info', 'Dashboard initialized');
@@ -1447,6 +1543,7 @@
         fetchBalance();
         fetchPnL();
         fetchAlerts();
+        fetchNearMissAlerts();
         fetchTrades();
         fetchOrders();
         fetchPositions();
@@ -1457,6 +1554,7 @@
         setInterval(fetchBalance, 30000);    // Balance every 30s
         setInterval(fetchPnL, 60000);        // PnL every 60s
         setInterval(() => fetchAlerts(false), 5000);      // Alerts every 5s
+        setInterval(() => fetchNearMissAlerts(false), 10000);  // Near-miss every 10s
         setInterval(() => fetchTrades(false), 30000);     // Trades every 30s
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
         setInterval(fetchPositions, 30000);  // Positions every 30s

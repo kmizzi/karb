@@ -280,6 +280,27 @@ class RealtimeArbitrageBot:
         else:
             log.warning("Async CLOB client not available - skipping neg_risk pre-cache")
 
+    async def _save_near_miss_alert(self, alert, min_required: Decimal) -> None:
+        """Save an illiquid arbitrage alert to the database."""
+        from datetime import datetime, timezone
+        from karb.data.repositories import NearMissAlertRepository
+
+        try:
+            await NearMissAlertRepository.insert(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                market=alert.market.question[:60],
+                yes_ask=float(alert.yes_ask),
+                no_ask=float(alert.no_ask),
+                combined=float(alert.combined_cost),
+                profit_pct=float(alert.profit_pct),
+                yes_liquidity=float(alert.yes_size_available),
+                no_liquidity=float(alert.no_size_available),
+                min_required=float(min_required),
+                reason="insufficient_liquidity",
+            )
+        except Exception as e:
+            log.debug("Failed to save near-miss alert", error=str(e))
+
     async def _on_arbitrage(self, alert) -> None:
         """Handle arbitrage alert from scanner."""
         from karb.api.models import ArbitrageOpportunity
@@ -305,6 +326,8 @@ class RealtimeArbitrageBot:
                 no_available=float(alert.no_size_available),
                 min_required=float(min_required_size),
             )
+            # Save near-miss alert for visibility (non-blocking)
+            asyncio.create_task(self._save_near_miss_alert(alert, min_required_size))
             return
 
         trade_size = min(available_size, max_position)

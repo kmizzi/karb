@@ -329,6 +329,39 @@ def create_app() -> FastAPI:
             "has_more": offset + len(alerts) < total,
         }
 
+    @app.get("/api/near-miss-alerts")
+    async def get_near_miss_alerts(
+        limit: int = 10,
+        offset: int = 0,
+        username: str = Depends(verify_credentials),
+    ):
+        """Get near-miss (illiquid) arbitrage alerts from database with pagination."""
+        from karb.data.repositories import NearMissAlertRepository
+
+        alerts = await NearMissAlertRepository.get_recent(limit=limit, offset=offset)
+        total = await NearMissAlertRepository.get_total_count()
+        return {
+            "alerts": [
+                {
+                    "timestamp": a.get("timestamp", ""),
+                    "market": a.get("market", ""),
+                    "profit_pct": float(a.get("profit_pct", 0) or 0),
+                    "combined": float(a.get("combined", 0) or 0),
+                    "yes_ask": float(a.get("yes_ask", 0) or 0),
+                    "no_ask": float(a.get("no_ask", 0) or 0),
+                    "yes_liquidity": float(a.get("yes_liquidity", 0) or 0),
+                    "no_liquidity": float(a.get("no_liquidity", 0) or 0),
+                    "min_required": float(a.get("min_required", 0) or 0),
+                    "reason": a.get("reason", "insufficient_liquidity"),
+                }
+                for a in alerts
+            ],
+            "count": len(alerts),
+            "total": total,
+            "offset": offset,
+            "has_more": offset + len(alerts) < total,
+        }
+
     @app.get("/api/redeemable")
     async def get_redeemable(username: str = Depends(verify_credentials)):
         """Get positions that can be redeemed."""

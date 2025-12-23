@@ -522,3 +522,69 @@ class ClosedPositionRepository:
             )
             row = await cursor.fetchone()
             return dict(row) if row else {}
+
+
+class NearMissAlertRepository:
+    """Repository for near-miss (illiquid) arbitrage alerts."""
+
+    MAX_ALERTS = 100  # Keep last 100 near-miss alerts
+
+    @staticmethod
+    async def insert(
+        timestamp: str,
+        market: str,
+        yes_ask: float,
+        no_ask: float,
+        combined: float,
+        profit_pct: float,
+        yes_liquidity: float,
+        no_liquidity: float,
+        min_required: float,
+        reason: str = "insufficient_liquidity",
+    ) -> int:
+        """Insert a new near-miss alert and cleanup old ones."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                """
+                INSERT INTO near_miss_alerts (
+                    timestamp, market, yes_ask, no_ask, combined, profit_pct,
+                    yes_liquidity, no_liquidity, min_required, reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    timestamp, market, yes_ask, no_ask, combined, profit_pct,
+                    yes_liquidity, no_liquidity, min_required, reason
+                ),
+            )
+            alert_id = cursor.lastrowid or 0
+
+            # Cleanup old alerts (keep last MAX_ALERTS)
+            await conn.execute(
+                """
+                DELETE FROM near_miss_alerts WHERE id NOT IN (
+                    SELECT id FROM near_miss_alerts ORDER BY id DESC LIMIT ?
+                )
+                """,
+                (NearMissAlertRepository.MAX_ALERTS,),
+            )
+
+            return alert_id
+
+    @staticmethod
+    async def get_recent(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        """Get recent near-miss alerts with pagination."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                "SELECT * FROM near_miss_alerts ORDER BY id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    @staticmethod
+    async def get_total_count() -> int:
+        """Get total count of near-miss alerts."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute("SELECT COUNT(*) as count FROM near_miss_alerts")
+            row = await cursor.fetchone()
+            return row["count"] if row else 0

@@ -249,6 +249,21 @@ CREATE TABLE IF NOT EXISTS closed_positions (
     redeemed INTEGER DEFAULT 0
 );
 
+-- Near-miss alerts (good arbs skipped due to insufficient liquidity)
+CREATE TABLE IF NOT EXISTS near_miss_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    market TEXT NOT NULL,
+    yes_ask REAL NOT NULL,
+    no_ask REAL NOT NULL,
+    combined REAL NOT NULL,
+    profit_pct REAL NOT NULL,
+    yes_liquidity REAL NOT NULL,
+    no_liquidity REAL NOT NULL,
+    min_required REAL NOT NULL,
+    reason TEXT DEFAULT 'insufficient_liquidity'
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_platform ON trades(platform);
@@ -256,6 +271,7 @@ CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
 CREATE INDEX IF NOT EXISTS idx_executions_timestamp ON executions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON portfolio_snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_closed_positions_timestamp ON closed_positions(timestamp);
+CREATE INDEX IF NOT EXISTS idx_near_miss_alerts_timestamp ON near_miss_alerts(timestamp);
 """
 
 
