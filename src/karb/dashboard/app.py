@@ -14,6 +14,7 @@ from karb.config import get_settings
 from karb.data.database import init_async_db
 from karb.data.repositories import (
     AlertRepository,
+    ClosedPositionRepository,
     ExecutionRepository,
     StatsRepository,
     TradeRepository,
@@ -185,6 +186,26 @@ def create_app() -> FastAPI:
             open_positions = [p for p in formatted if p["status"] == "OPEN"]
             closed_positions = [p for p in formatted if p["status"] != "OPEN"]
 
+            # Store closed positions in database for history
+            for pos in closed_positions:
+                token_id = pos.get("token_id", "")
+                if token_id and not await ClosedPositionRepository.exists(token_id):
+                    await ClosedPositionRepository.insert(
+                        timestamp=datetime.now().isoformat(),
+                        market_title=pos.get("market"),
+                        outcome=pos.get("outcome"),
+                        token_id=token_id,
+                        size=pos.get("size", 0),
+                        avg_price=pos.get("avg_price"),
+                        exit_price=pos.get("current_price"),
+                        cost_basis=pos.get("initial_value"),
+                        realized_value=pos.get("current_value"),
+                        realized_pnl=pos.get("pnl"),
+                        status=pos.get("status"),
+                        redeemed=pos.get("redeemable", False),
+                    )
+                    log.info("Stored closed position", market=pos.get("market", "")[:30])
+
             return {
                 "open": open_positions,
                 "closed": closed_positions,
@@ -195,13 +216,47 @@ def create_app() -> FastAPI:
             log.error("Failed to get positions", error=str(e))
             return {"positions": [], "error": str(e)}
 
+    @app.get("/api/closed-positions")
+    async def get_closed_positions(
+        limit: int = 20,
+        offset: int = 0,
+        username: str = Depends(verify_credentials),
+    ):
+        """Get closed positions history from database with pagination."""
+        positions = await ClosedPositionRepository.get_recent(limit=limit, offset=offset)
+        total = await ClosedPositionRepository.get_total_count()
+        return {
+            "positions": [
+                {
+                    "timestamp": p.get("timestamp", ""),
+                    "market": p.get("market_title", ""),
+                    "outcome": p.get("outcome", ""),
+                    "size": float(p.get("size", 0)),
+                    "avg_price": float(p.get("avg_price", 0) or 0),
+                    "exit_price": float(p.get("exit_price", 0) or 0),
+                    "cost_basis": float(p.get("cost_basis", 0) or 0),
+                    "realized_value": float(p.get("realized_value", 0) or 0),
+                    "realized_pnl": float(p.get("realized_pnl", 0) or 0),
+                    "status": p.get("status", ""),
+                    "redeemed": bool(p.get("redeemed", 0)),
+                }
+                for p in positions
+            ],
+            "count": len(positions),
+            "total": total,
+            "offset": offset,
+            "has_more": offset + len(positions) < total,
+        }
+
     @app.get("/api/trades")
     async def get_trades(
         limit: int = 20,
+        offset: int = 0,
         username: str = Depends(verify_credentials),
     ):
-        """Get recent trades from database."""
-        trades = await TradeRepository.get_recent(limit=limit)
+        """Get trades from database with pagination."""
+        trades = await TradeRepository.get_recent(limit=limit, offset=offset)
+        total = await TradeRepository.get_total_count()
         return {
             "trades": [
                 {
@@ -217,6 +272,9 @@ def create_app() -> FastAPI:
                 for t in trades
             ],
             "count": len(trades),
+            "total": total,
+            "offset": offset,
+            "has_more": offset + len(trades) < total,
         }
 
     @app.get("/api/pnl")
@@ -230,20 +288,43 @@ def create_app() -> FastAPI:
         tracker = PortfolioTracker()
         pnl = await tracker.get_profit_loss()
 
+        # Get execution stats for expected profit
+        exec_stats = await ExecutionRepository.get_stats()
+
+        # Get realized profit from closed positions
+        closed_summary = await ClosedPositionRepository.get_profit_summary()
+
         return {
             "daily": daily,
             "all_time": all_time,
             "portfolio": pnl,
+            "expected_profit": exec_stats.get("total_profit", 0),
+            "realized": {
+                "total_pnl": closed_summary.get("total_realized_pnl") or 0,
+                "winning_positions": closed_summary.get("winning_positions") or 0,
+                "losing_positions": closed_summary.get("losing_positions") or 0,
+                "total_positions": closed_summary.get("total_positions") or 0,
+                "total_cost": closed_summary.get("total_cost_basis") or 0,
+                "total_value": closed_summary.get("total_realized_value") or 0,
+            },
         }
 
     @app.get("/api/alerts")
     async def get_alerts(
         limit: int = 10,
+        offset: int = 0,
         username: str = Depends(verify_credentials),
     ):
-        """Get recent arbitrage alerts from database."""
-        alerts = await AlertRepository.get_recent(limit=limit)
-        return {"alerts": alerts, "count": len(alerts)}
+        """Get arbitrage alerts from database with pagination."""
+        alerts = await AlertRepository.get_recent(limit=limit, offset=offset)
+        total = await AlertRepository.get_total_count()
+        return {
+            "alerts": alerts,
+            "count": len(alerts),
+            "total": total,
+            "offset": offset,
+            "has_more": offset + len(alerts) < total,
+        }
 
     @app.get("/api/redeemable")
     async def get_redeemable(username: str = Depends(verify_credentials)):

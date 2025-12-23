@@ -632,23 +632,43 @@
             <!-- Alerts Section -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">Recent Arbitrage Alerts</span>
-                    <span class="refresh-indicator">Live</span>
+                    <span class="card-title">Arbitrage Alerts</span>
+                    <span id="alerts-count" class="refresh-indicator">Live</span>
                 </div>
                 <div id="alerts-container">
                     <div class="empty-state">Monitoring for opportunities...</div>
+                </div>
+                <div id="alerts-pagination" style="margin-top: 12px; text-align: center; display: none;">
+                    <button class="btn" id="alerts-load-more">Load More</button>
                 </div>
             </div>
 
             <!-- Trades Section -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">Recent Trades</span>
-                    <span class="refresh-indicator">Live</span>
+                    <span class="card-title">Trade History</span>
+                    <span id="trades-count" class="refresh-indicator">Live</span>
                 </div>
                 <div class="table-container" id="trades-container">
                     <div class="empty-state">No trades yet</div>
                 </div>
+                <div id="trades-pagination" style="margin-top: 12px; text-align: center; display: none;">
+                    <button class="btn" id="trades-load-more">Load More</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Closed Positions History -->
+        <div class="card" style="margin-top: 24px;">
+            <div class="card-header">
+                <span class="card-title">Closed Positions History</span>
+                <span id="closed-history-count" class="refresh-indicator">-</span>
+            </div>
+            <div class="table-container" id="closed-history-container">
+                <div class="empty-state">Loading history...</div>
+            </div>
+            <div id="closed-history-pagination" style="margin-top: 12px; text-align: center; display: none;">
+                <button class="btn" id="closed-history-load-more">Load More</button>
             </div>
         </div>
     </div>
@@ -775,15 +795,22 @@
                 const data = await resp.json();
                 const daily = data.daily;
                 const allTime = data.all_time;
+                const realized = data.realized || {};
+
+                const realizedPnl = realized.total_pnl || 0;
+                const pnlColor = realizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                const pnlSign = realizedPnl >= 0 ? '+' : '';
 
                 document.getElementById('pnl-content').innerHTML = `
+                    <div class="stat-value" style="color: ${pnlColor};">${pnlSign}$${realizedPnl.toFixed(2)}</div>
+                    <div class="stat-label" style="margin-bottom: 12px;">Realized P&L</div>
                     <div class="stat-row">
-                        <span>Today's Trades</span>
-                        <span>${daily.trade_count || 0}</span>
+                        <span>Winning Positions</span>
+                        <span class="positive">${realized.winning_positions || 0}</span>
                     </div>
                     <div class="stat-row">
-                        <span>Today's Volume</span>
-                        <span>$${(daily.total_volume || 0).toFixed(2)}</span>
+                        <span>Losing Positions</span>
+                        <span class="negative">${realized.losing_positions || 0}</span>
                     </div>
                     <div class="stat-row">
                         <span>All-Time Trades</span>
@@ -800,26 +827,55 @@
         }
 
         let lastAlertCount = 0;
-        async function fetchAlerts() {
-            try {
-                const resp = await fetch('/api/alerts?limit=10');
-                const data = await resp.json();
+        let alertsOffset = 0;
+        let alertsTotal = 0;
+        let allAlerts = [];
 
-                // Log new alerts
-                if (data.count > lastAlertCount && lastAlertCount > 0) {
-                    const newAlerts = data.alerts.slice(lastAlertCount);
+        async function fetchAlerts(loadMore = false) {
+            try {
+                if (!loadMore) {
+                    alertsOffset = 0;
+                    allAlerts = [];
+                }
+
+                const resp = await fetch(`/api/alerts?limit=10&offset=${alertsOffset}`);
+                const data = await resp.json();
+                alertsTotal = data.total || 0;
+
+                // Update count display
+                document.getElementById('alerts-count').textContent = `${alertsTotal} total`;
+
+                // Log new alerts (only on initial load)
+                if (!loadMore && data.count > lastAlertCount && lastAlertCount > 0) {
+                    const newAlerts = data.alerts.slice(0, data.count - lastAlertCount);
                     newAlerts.forEach(alert => {
                         addLogLine('alert', `ARBITRAGE: ${alert.market.slice(0, 40)}... +${(alert.profit * 100).toFixed(2)}%`);
                     });
                 }
                 lastAlertCount = data.count;
 
-                if (data.alerts.length === 0) {
+                // Append or replace alerts
+                if (loadMore) {
+                    allAlerts = [...allAlerts, ...data.alerts];
+                } else {
+                    allAlerts = data.alerts;
+                }
+                alertsOffset += data.count;
+
+                // Show/hide load more button
+                const pagination = document.getElementById('alerts-pagination');
+                if (data.has_more) {
+                    pagination.style.display = 'block';
+                } else {
+                    pagination.style.display = 'none';
+                }
+
+                if (allAlerts.length === 0) {
                     document.getElementById('alerts-container').innerHTML = `
                         <div class="empty-state">Monitoring for opportunities...</div>
                     `;
                 } else {
-                    document.getElementById('alerts-container').innerHTML = data.alerts.slice().reverse().map(alert => {
+                    document.getElementById('alerts-container').innerHTML = allAlerts.slice().reverse().map(alert => {
                         const platform = (alert.platform || 'polymarket').toUpperCase();
 
                         // Format resolution date in PST
@@ -883,18 +939,47 @@
         }
 
         let lastTradeCount = 0;
-        async function fetchTrades() {
-            try {
-                const resp = await fetch('/api/trades?limit=10');
-                const data = await resp.json();
+        let tradesOffset = 0;
+        let tradesTotal = 0;
+        let allTrades = [];
 
-                // Log new trades
-                if (data.count > lastTradeCount && lastTradeCount > 0) {
+        async function fetchTrades(loadMore = false) {
+            try {
+                if (!loadMore) {
+                    tradesOffset = 0;
+                    allTrades = [];
+                }
+
+                const resp = await fetch(`/api/trades?limit=10&offset=${tradesOffset}`);
+                const data = await resp.json();
+                tradesTotal = data.total || 0;
+
+                // Update count display
+                document.getElementById('trades-count').textContent = `${tradesTotal} total`;
+
+                // Log new trades (only on initial load)
+                if (!loadMore && data.count > lastTradeCount && lastTradeCount > 0) {
                     addLogLine('trade', `New trade executed!`);
                 }
                 lastTradeCount = data.count;
 
-                if (data.trades.length === 0) {
+                // Append or replace trades
+                if (loadMore) {
+                    allTrades = [...allTrades, ...data.trades];
+                } else {
+                    allTrades = data.trades;
+                }
+                tradesOffset += data.count;
+
+                // Show/hide load more button
+                const pagination = document.getElementById('trades-pagination');
+                if (data.has_more) {
+                    pagination.style.display = 'block';
+                } else {
+                    pagination.style.display = 'none';
+                }
+
+                if (allTrades.length === 0) {
                     document.getElementById('trades-container').innerHTML = `
                         <div class="empty-state">No trades yet</div>
                     `;
@@ -913,7 +998,7 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                ${data.trades.map(t => `
+                                ${allTrades.map(t => `
                                     <tr>
                                         <td>${formatDateTime(t.timestamp)}</td>
                                         <td>${t.market}</td>
@@ -1135,6 +1220,92 @@
             }
         }
 
+        // Closed positions history
+        let closedHistoryOffset = 0;
+        let closedHistoryTotal = 0;
+        let allClosedHistory = [];
+
+        async function fetchClosedHistory(loadMore = false) {
+            try {
+                if (!loadMore) {
+                    closedHistoryOffset = 0;
+                    allClosedHistory = [];
+                }
+
+                const resp = await fetch(`/api/closed-positions?limit=20&offset=${closedHistoryOffset}`);
+                const data = await resp.json();
+                closedHistoryTotal = data.total || 0;
+
+                // Update count display
+                document.getElementById('closed-history-count').textContent = `${closedHistoryTotal} total`;
+
+                // Append or replace
+                if (loadMore) {
+                    allClosedHistory = [...allClosedHistory, ...data.positions];
+                } else {
+                    allClosedHistory = data.positions;
+                }
+                closedHistoryOffset += data.count;
+
+                // Show/hide load more button
+                const pagination = document.getElementById('closed-history-pagination');
+                if (data.has_more) {
+                    pagination.style.display = 'block';
+                } else {
+                    pagination.style.display = 'none';
+                }
+
+                if (allClosedHistory.length === 0) {
+                    document.getElementById('closed-history-container').innerHTML = `
+                        <div class="empty-state">No closed positions recorded yet</div>
+                    `;
+                } else {
+                    document.getElementById('closed-history-container').innerHTML = `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Market</th>
+                                    <th>Outcome</th>
+                                    <th>Size</th>
+                                    <th>Cost</th>
+                                    <th>Value</th>
+                                    <th>P&L</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${allClosedHistory.map(p => {
+                                    const pnlColor = p.realized_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                                    const pnlSign = p.realized_pnl >= 0 ? '+' : '';
+                                    const statusIcon = p.status === 'WON' ? '✓' : p.status === 'LOST' ? '✗' : '-';
+                                    const statusColor = p.status === 'WON' ? 'var(--accent-green)' : p.status === 'LOST' ? 'var(--accent-red)' : 'var(--text-secondary)';
+                                    return `
+                                    <tr>
+                                        <td>${formatDateTime(p.timestamp)}</td>
+                                        <td>${p.market || '-'}</td>
+                                        <td><span style="color: ${p.outcome === 'Yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${p.outcome || '-'}</span></td>
+                                        <td>${p.size.toFixed(0)}</td>
+                                        <td>$${p.cost_basis.toFixed(2)}</td>
+                                        <td>$${p.realized_value.toFixed(2)}</td>
+                                        <td style="color: ${pnlColor}; font-weight: 600;">${pnlSign}$${p.realized_pnl.toFixed(2)}</td>
+                                        <td><span style="color: ${statusColor};">${statusIcon} ${p.status}${p.redeemed ? ' 💰' : ''}</span></td>
+                                    </tr>
+                                `}).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+            } catch (e) {
+                console.error('Closed history fetch error:', e);
+            }
+        }
+
+        // Event listeners for load more buttons
+        document.getElementById('alerts-load-more').addEventListener('click', () => fetchAlerts(true));
+        document.getElementById('trades-load-more').addEventListener('click', () => fetchTrades(true));
+        document.getElementById('closed-history-load-more').addEventListener('click', () => fetchClosedHistory(true));
+
         // Initial load
         addLogLine('info', 'Dashboard initialized');
         fetchStatus();
@@ -1144,15 +1315,17 @@
         fetchTrades();
         fetchOrders();
         fetchPositions();
+        fetchClosedHistory();
 
         // Refresh intervals
         setInterval(fetchStatus, 5000);      // Status every 5s
         setInterval(fetchBalance, 30000);    // Balance every 30s
         setInterval(fetchPnL, 60000);        // PnL every 60s
-        setInterval(fetchAlerts, 5000);      // Alerts every 5s
-        setInterval(fetchTrades, 30000);     // Trades every 30s
+        setInterval(() => fetchAlerts(false), 5000);      // Alerts every 5s
+        setInterval(() => fetchTrades(false), 30000);     // Trades every 30s
         setInterval(fetchOrders, 2000);      // Orders every 2s (to catch pending fills)
         setInterval(fetchPositions, 30000);  // Positions every 30s
+        setInterval(() => fetchClosedHistory(false), 60000);  // Closed history every 60s
 
         addLogLine('info', 'Live updates enabled');
     </script>

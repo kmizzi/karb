@@ -50,6 +50,7 @@ class TradeRepository:
     @staticmethod
     async def get_recent(
         limit: int = 50,
+        offset: int = 0,
         platform: Optional[str] = None,
         since: Optional[str] = None,
     ) -> list[dict[str, Any]]:
@@ -65,12 +66,33 @@ class TradeRepository:
                 query += " AND timestamp >= ?"
                 params.append(since)
 
-            query += " ORDER BY timestamp DESC LIMIT ?"
-            params.append(limit)
+            query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
 
             cursor = await conn.execute(query, params)
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    @staticmethod
+    async def get_total_count(
+        platform: Optional[str] = None,
+        since: Optional[str] = None,
+    ) -> int:
+        """Get total count of trades."""
+        async with get_async_db() as conn:
+            query = "SELECT COUNT(*) as count FROM trades WHERE 1=1"
+            params: list[Any] = []
+
+            if platform:
+                query += " AND platform = ?"
+                params.append(platform)
+            if since:
+                query += " AND timestamp >= ?"
+                params.append(since)
+
+            cursor = await conn.execute(query, params)
+            row = await cursor.fetchone()
+            return row["count"] if row else 0
 
     @staticmethod
     async def get_daily_summary(date: str) -> dict[str, Any]:
@@ -160,15 +182,23 @@ class AlertRepository:
             return alert_id
 
     @staticmethod
-    async def get_recent(limit: int = 50) -> list[dict[str, Any]]:
-        """Get recent alerts."""
+    async def get_recent(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        """Get recent alerts with pagination."""
         async with get_async_db() as conn:
             cursor = await conn.execute(
-                "SELECT * FROM alerts ORDER BY id DESC LIMIT ?",
-                (limit,),
+                "SELECT * FROM alerts ORDER BY id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    @staticmethod
+    async def get_total_count() -> int:
+        """Get total count of alerts."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute("SELECT COUNT(*) as count FROM alerts")
+            row = await cursor.fetchone()
+            return row["count"] if row else 0
 
 
 class ExecutionRepository:
@@ -386,3 +416,90 @@ class PortfolioRepository:
                     "end_time": end.get("timestamp"),
                 }
             return {}
+
+
+class ClosedPositionRepository:
+    """Repository for closed position history."""
+
+    @staticmethod
+    async def insert(
+        timestamp: str,
+        market_title: Optional[str] = None,
+        outcome: Optional[str] = None,
+        token_id: Optional[str] = None,
+        condition_id: Optional[str] = None,
+        size: float = 0.0,
+        avg_price: Optional[float] = None,
+        exit_price: Optional[float] = None,
+        cost_basis: Optional[float] = None,
+        realized_value: Optional[float] = None,
+        realized_pnl: Optional[float] = None,
+        status: Optional[str] = None,
+        redeemed: bool = False,
+    ) -> int:
+        """Insert a closed position record."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                """
+                INSERT INTO closed_positions (
+                    timestamp, market_title, outcome, token_id, condition_id,
+                    size, avg_price, exit_price, cost_basis, realized_value,
+                    realized_pnl, status, redeemed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    timestamp, market_title, outcome, token_id, condition_id,
+                    size, avg_price, exit_price, cost_basis, realized_value,
+                    realized_pnl, status, 1 if redeemed else 0
+                ),
+            )
+            return cursor.lastrowid or 0
+
+    @staticmethod
+    async def exists(token_id: str) -> bool:
+        """Check if a closed position already exists."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                "SELECT 1 FROM closed_positions WHERE token_id = ? LIMIT 1",
+                (token_id,),
+            )
+            row = await cursor.fetchone()
+            return row is not None
+
+    @staticmethod
+    async def get_recent(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        """Get recent closed positions with pagination."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                "SELECT * FROM closed_positions ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    @staticmethod
+    async def get_total_count() -> int:
+        """Get total count of closed positions."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute("SELECT COUNT(*) as count FROM closed_positions")
+            row = await cursor.fetchone()
+            return row["count"] if row else 0
+
+    @staticmethod
+    async def get_profit_summary() -> dict[str, Any]:
+        """Get summary of realized P&L from closed positions."""
+        async with get_async_db() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT
+                    COUNT(*) as total_positions,
+                    SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) as winning_positions,
+                    SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) as losing_positions,
+                    SUM(realized_pnl) as total_realized_pnl,
+                    SUM(cost_basis) as total_cost_basis,
+                    SUM(realized_value) as total_realized_value
+                FROM closed_positions
+                """
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else {}

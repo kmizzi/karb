@@ -226,10 +226,29 @@ CREATE TABLE IF NOT EXISTS execution_stats (
 INSERT OR IGNORE INTO scanner_stats (id) VALUES (1);
 INSERT OR IGNORE INTO execution_stats (id) VALUES (1);
 
+-- Closed positions history (for tracking resolved positions)
+CREATE TABLE IF NOT EXISTS closed_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    market_title TEXT,
+    outcome TEXT,
+    token_id TEXT,
+    condition_id TEXT,
+    size REAL NOT NULL,
+    avg_price REAL,
+    exit_price REAL,
+    cost_basis REAL,
+    realized_value REAL,
+    realized_pnl REAL,
+    status TEXT,
+    redeemed INTEGER DEFAULT 0
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_platform ON trades(platform);
 CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
 CREATE INDEX IF NOT EXISTS idx_executions_timestamp ON executions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON portfolio_snapshots(timestamp);
+CREATE INDEX IF NOT EXISTS idx_closed_positions_timestamp ON closed_positions(timestamp);
 """
