@@ -613,6 +613,157 @@ def pnl() -> None:
 
 
 @cli.command()
+def redeem() -> None:
+    """Redeem resolved positions back to USDC."""
+    setup_logging("INFO")
+
+    async def _redeem() -> None:
+        from karb.executor.redemption import get_redeemable_positions, redeem_all_positions
+
+        settings = get_settings()
+
+        if not settings.wallet_address:
+            console.print("[red]Error:[/red] No wallet address configured")
+            return
+
+        console.print("\n[bold]Checking for redeemable positions...[/bold]\n")
+
+        # First show what we'll redeem
+        positions = await get_redeemable_positions(settings.wallet_address)
+
+        if not positions:
+            console.print("[yellow]No positions to redeem[/yellow]")
+            return
+
+        table = Table(title="Redeemable Positions")
+        table.add_column("Market", max_width=40)
+        table.add_column("Outcome")
+        table.add_column("Size", justify="right")
+        table.add_column("Value", justify="right")
+
+        total_value = 0
+        for p in positions:
+            value = float(p.get("currentValue", 0))
+            total_value += value
+            table.add_row(
+                p.get("title", "Unknown")[:40],
+                p.get("outcome", "?"),
+                str(p.get("size", 0)),
+                f"${value:.2f}",
+            )
+
+        console.print(table)
+        console.print(f"\n[bold]Total to redeem:[/bold] ${total_value:.2f}\n")
+
+        # Confirm
+        if settings.dry_run:
+            console.print("[yellow]DRY RUN mode - no actual redemption will occur[/yellow]")
+            return
+
+        if not click.confirm("Proceed with redemption?"):
+            console.print("[dim]Cancelled[/dim]")
+            return
+
+        console.print("\n[bold]Redeeming positions...[/bold]\n")
+        result = await redeem_all_positions()
+
+        if result.get("error"):
+            console.print(f"[red]Error:[/red] {result['error']}")
+            return
+
+        console.print(f"[green]Successfully redeemed:[/green] {result['redeemed']} positions")
+        if result.get("failed"):
+            console.print(f"[red]Failed:[/red] {result['failed']} positions")
+        console.print(f"[bold]Total value:[/bold] ${result['total_value']:.2f}")
+
+    asyncio.run(_redeem())
+
+
+@cli.command()
+def positions() -> None:
+    """Show current positions from Polymarket."""
+    setup_logging("WARNING")
+
+    async def _positions() -> None:
+        from karb.executor.redemption import get_redeemable_positions
+        import httpx
+
+        settings = get_settings()
+
+        if not settings.wallet_address:
+            console.print("[red]Error:[/red] No wallet address configured")
+            return
+
+        console.print("\n[bold]Fetching positions...[/bold]\n")
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://data-api.polymarket.com/positions?user={settings.wallet_address}"
+            )
+            positions = resp.json()
+
+        if not positions:
+            console.print("[yellow]No positions found[/yellow]")
+            return
+
+        # Open positions
+        open_positions = [p for p in positions if not p.get("redeemable") and float(p.get("size", 0)) > 0]
+        if open_positions:
+            table = Table(title="Open Positions")
+            table.add_column("Market", max_width=40)
+            table.add_column("Outcome")
+            table.add_column("Size", justify="right")
+            table.add_column("Avg Price", justify="right")
+            table.add_column("Current", justify="right")
+            table.add_column("P&L", justify="right")
+
+            for p in open_positions:
+                pnl = float(p.get("cashPnl", 0))
+                pnl_color = "green" if pnl >= 0 else "red"
+                table.add_row(
+                    p.get("title", "Unknown")[:40],
+                    p.get("outcome", "?"),
+                    str(p.get("size", 0)),
+                    f"${float(p.get('avgPrice', 0)):.3f}",
+                    f"${float(p.get('curPrice', 0)):.3f}",
+                    f"[{pnl_color}]${pnl:.2f}[/{pnl_color}]",
+                )
+
+            console.print(table)
+            console.print()
+
+        # Redeemable positions
+        redeemable = [p for p in positions if p.get("redeemable") and float(p.get("size", 0)) > 0]
+        if redeemable:
+            table = Table(title="Redeemable Positions (Resolved)")
+            table.add_column("Market", max_width=40)
+            table.add_column("Outcome")
+            table.add_column("Size", justify="right")
+            table.add_column("Value", justify="right")
+            table.add_column("P&L", justify="right")
+
+            total_value = 0
+            for p in redeemable:
+                value = float(p.get("currentValue", 0))
+                total_value += value
+                pnl = float(p.get("cashPnl", 0))
+                pnl_color = "green" if pnl >= 0 else "red"
+                table.add_row(
+                    p.get("title", "Unknown")[:40],
+                    p.get("outcome", "?"),
+                    str(p.get("size", 0)),
+                    f"${value:.2f}",
+                    f"[{pnl_color}]${pnl:.2f}[/{pnl_color}]",
+                )
+
+            console.print(table)
+            console.print(f"\n[bold]Total redeemable:[/bold] ${total_value:.2f}")
+            console.print("[dim]Run 'karb redeem' to claim these positions[/dim]")
+
+    asyncio.run(_positions())
+
+
+@cli.command()
 @click.option("--host", default="0.0.0.0", help="Host to bind to")
 @click.option("--port", type=int, help="Port to run on (default: from config)")
 def dashboard(host: str, port: Optional[int]) -> None:

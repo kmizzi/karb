@@ -245,6 +245,53 @@ def create_app() -> FastAPI:
         alerts = await AlertRepository.get_recent(limit=limit)
         return {"alerts": alerts, "count": len(alerts)}
 
+    @app.get("/api/redeemable")
+    async def get_redeemable(username: str = Depends(verify_credentials)):
+        """Get positions that can be redeemed."""
+        from karb.executor.redemption import get_redeemable_positions
+
+        settings = get_settings()
+        if not settings.wallet_address:
+            return {"error": "No wallet configured", "positions": []}
+
+        try:
+            positions = await get_redeemable_positions(settings.wallet_address)
+            total_value = sum(float(p.get("currentValue", 0)) for p in positions)
+
+            return {
+                "positions": [
+                    {
+                        "market": p.get("title", "Unknown"),
+                        "outcome": p.get("outcome", "?"),
+                        "size": p.get("size", 0),
+                        "value": float(p.get("currentValue", 0)),
+                        "pnl": float(p.get("cashPnl", 0)),
+                    }
+                    for p in positions
+                ],
+                "count": len(positions),
+                "total_value": total_value,
+            }
+        except Exception as e:
+            log.error("Failed to get redeemable positions", error=str(e))
+            return {"error": str(e), "positions": []}
+
+    @app.post("/api/redeem")
+    async def redeem_positions(username: str = Depends(verify_credentials)):
+        """Trigger redemption of all redeemable positions."""
+        from karb.executor.redemption import redeem_all_positions
+
+        settings = get_settings()
+        if settings.dry_run:
+            return {"error": "Cannot redeem in dry run mode", "redeemed": 0}
+
+        try:
+            result = await redeem_all_positions()
+            return result
+        except Exception as e:
+            log.error("Redemption failed", error=str(e))
+            return {"error": str(e), "redeemed": 0}
+
     @app.get("/api/orders")
     async def get_orders(username: str = Depends(verify_credentials)):
         """Get current order status and recent executions from database."""
