@@ -1050,9 +1050,9 @@
                             <div class="alert-details" style="margin-top: 4px;">
                                 <span style="color: #888;">Resolves: ${resolveStr}</span>
                                 <span style="margin-left: 12px; color: #666;">Spotted: ${alertTime}</span>
-                                ${alert.duration_secs !== null && alert.duration_secs !== undefined
-                                    ? `<span style="margin-left: 12px; color: var(--accent-yellow);">Open: ${alert.duration_secs < 1 ? Math.round(alert.duration_secs * 1000) + 'ms' : alert.duration_secs.toFixed(1) + 's'}</span>`
-                                    : ''}
+                                ${alert.duration_secs !== null && alert.duration_secs !== undefined && alert.duration_secs > 0
+                                    ? `<span style="margin-left: 12px; color: var(--accent-yellow);">Lasted: ${alert.duration_secs < 1 ? Math.round(alert.duration_secs * 1000) + 'ms' : alert.duration_secs.toFixed(1) + 's'}</span>`
+                                    : `<span style="margin-left: 12px; color: #666;">Lasted: pending</span>`}
                             </div>
                         </div>
                     `}).join('');

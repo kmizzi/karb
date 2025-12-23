@@ -326,7 +326,7 @@ class RealtimeScanner:
                     self._best_near_miss_market = prices.market.question[:40]
 
         if not prices.has_arbitrage:
-            # If this market had an active opportunity that just ended, log it
+            # If this market had an active opportunity that just ended, update its duration
             market_id = prices.market.id
             if market_id in self._active_opportunities:
                 first_seen = self._active_opportunities.pop(market_id)
@@ -334,8 +334,13 @@ class RealtimeScanner:
                 log.info(
                     "Opportunity closed",
                     market=prices.market.question[:40],
-                    duration_secs=f"{duration_secs:.1f}s",
+                    duration_secs=f"{duration_secs:.3f}s",
                 )
+                # Update the alert's duration in the database
+                asyncio.create_task(self._update_alert_duration(
+                    prices.market.question[:60],
+                    duration_secs,
+                ))
             return
 
         # Check resolution date - skip markets that resolve too far in the future
@@ -444,7 +449,8 @@ class RealtimeScanner:
                 log.error("Arbitrage callback error", error=str(e))
 
         # Save alert to database (non-blocking, creates async task)
-        self._save_alert(alert, first_seen, duration_secs)
+        # Duration is set later when opportunity closes via _update_alert_duration
+        self._save_alert(alert, first_seen, None)
 
         # Send Slack notification (already async)
         try:
@@ -655,6 +661,19 @@ class RealtimeScanner:
             )
         except Exception as e:
             log.debug("Failed to save alert to database", error=str(e))
+
+    async def _update_alert_duration(self, market: str, duration_secs: float) -> None:
+        """Update the duration of an alert when the opportunity closes."""
+        try:
+            updated = await AlertRepository.update_duration(market, duration_secs)
+            if updated:
+                log.debug(
+                    "Updated alert duration",
+                    market=market[:30],
+                    duration_secs=f"{duration_secs:.3f}s",
+                )
+        except Exception as e:
+            log.debug("Failed to update alert duration", error=str(e))
 
     def stop(self) -> None:
         """Stop the scanner."""

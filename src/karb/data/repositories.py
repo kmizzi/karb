@@ -221,6 +221,28 @@ class AlertRepository:
             return [dict(row) for row in rows]
 
     @staticmethod
+    async def update_duration(market: str, duration_secs: float) -> bool:
+        """Update duration_secs for the most recent alert of a market.
+
+        Called when an opportunity closes to record actual window lifetime.
+        Returns True if an alert was updated.
+        """
+        async with get_async_db() as conn:
+            # Find and update the most recent alert for this market that has no duration
+            cursor = await conn.execute(
+                """
+                UPDATE alerts SET duration_secs = ?
+                WHERE id = (
+                    SELECT id FROM alerts
+                    WHERE market = ? AND (duration_secs IS NULL OR duration_secs = 0)
+                    ORDER BY id DESC LIMIT 1
+                )
+                """,
+                (round(duration_secs, 3), market),
+            )
+            return cursor.rowcount > 0
+
+    @staticmethod
     async def get_window_stats() -> dict[str, Any]:
         """Get arb window duration statistics (how long opportunities last)."""
         async with get_async_db() as conn:
