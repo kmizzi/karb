@@ -931,12 +931,13 @@
                                     : p.status === 'LOST' ? 'var(--accent-red)'
                                     : p.status === 'OPEN' ? 'var(--accent-blue)'
                                     : 'var(--accent-yellow)';
+                                const costBasis = p.initial_value || (p.size * p.avg_price);
                                 return `
                                 <tr>
                                     <td>${p.market || p.token_id?.substring(0, 20) || 'Unknown'}</td>
                                     <td><span style="color: ${p.outcome === 'Yes' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">${p.outcome || '-'}</span></td>
                                     <td><span style="color: ${statusColor}; font-weight: 600;">${p.status}${p.redeemable ? ' 💰' : ''}</span></td>
-                                    <td>${p.size}</td>
+                                    <td>${p.size} <span style="color: var(--text-secondary);">($${costBasis?.toFixed(2)})</span></td>
                                     <td>$${p.avg_price?.toFixed(3) || '-'}</td>
                                     <td>$${p.current_price?.toFixed(3) || '-'}</td>
                                     <td style="color: ${pnlColor}; font-weight: 600;">$${p.pnl?.toFixed(2) || '0.00'}</td>
