@@ -1157,7 +1157,15 @@
                             }) + ' PST';
                         }
 
-                        const minLiquidity = Math.min(alert.yes_liquidity, alert.no_liquidity);
+                        // Calculate dollar liquidity (shares × price)
+                        const yesShares = alert.yes_liquidity || 0;
+                        const noShares = alert.no_liquidity || 0;
+                        const yesDollarLiq = yesShares * (alert.yes_ask || 0);
+                        const noDollarLiq = noShares * (alert.no_ask || 0);
+                        const minDollarLiq = Math.min(yesDollarLiq, noDollarLiq);
+                        const minSharesRequired = alert.min_required || 10;
+                        // Min required in dollars uses the cheaper side (NO) price
+                        const minDollarRequired = minSharesRequired * Math.min(alert.yes_ask || 1, alert.no_ask || 1);
 
                         return `
                         <div class="alert-item" style="border-left: 3px solid var(--accent-yellow);">
@@ -1172,8 +1180,8 @@
                                 <span class="alert-profit">+${((alert.profit_pct || 0) * 100).toFixed(2)}%</span>
                             </div>
                             <div class="alert-details" style="margin-top: 4px;">
-                                <span style="color: var(--accent-red);">Liquidity: $${minLiquidity.toFixed(2)} (need $${alert.min_required})</span>
-                                <span style="margin-left: 12px; color: #888;">YES Liq: $${alert.yes_liquidity.toFixed(2)} | NO Liq: $${alert.no_liquidity.toFixed(2)}</span>
+                                <span style="color: var(--accent-red);">Liquidity: $${minDollarLiq.toFixed(2)} (need $${minDollarRequired.toFixed(2)})</span>
+                                <span style="margin-left: 12px; color: #888;">YES: $${yesDollarLiq.toFixed(2)} (${yesShares.toFixed(0)} sh) | NO: $${noDollarLiq.toFixed(2)} (${noShares.toFixed(0)} sh)</span>
                                 <span style="margin-left: 12px; color: #666;">Spotted: ${alertTime}</span>
                             </div>
                         </div>
@@ -1446,9 +1454,16 @@
 
                                 // Format arb profit %
                                 const arbPct = e.profit_pct ? `+${(e.profit_pct * 100).toFixed(2)}%` : '-';
-                                // Format liquidity for each side (use separate values, fallback to combined/2)
-                                const yesLiq = e.yes_liquidity ? `$${e.yes_liquidity.toLocaleString(undefined, {maximumFractionDigits: 0})}` : (e.market_liquidity ? `$${(e.market_liquidity/2).toLocaleString(undefined, {maximumFractionDigits: 0})}` : '-');
-                                const noLiq = e.no_liquidity ? `$${e.no_liquidity.toLocaleString(undefined, {maximumFractionDigits: 0})}` : (e.market_liquidity ? `$${(e.market_liquidity/2).toLocaleString(undefined, {maximumFractionDigits: 0})}` : '-');
+                                // Calculate dollar liquidity (shares × price)
+                                const yesSharesExec = e.yes_liquidity || 0;
+                                const noSharesExec = e.no_liquidity || 0;
+                                const yesPriceExec = e.yes_order?.price || 0;
+                                const noPriceExec = e.no_order?.price || 0;
+                                const yesDollarLiqExec = yesSharesExec * yesPriceExec;
+                                const noDollarLiqExec = noSharesExec * noPriceExec;
+                                // Format with both dollar value and shares
+                                const yesLiq = yesSharesExec > 0 ? `$${yesDollarLiqExec.toFixed(0)} (${yesSharesExec.toFixed(0)}sh)` : (e.market_liquidity ? `$${(e.market_liquidity/2).toLocaleString(undefined, {maximumFractionDigits: 0})}` : '-');
+                                const noLiq = noSharesExec > 0 ? `$${noDollarLiqExec.toFixed(0)} (${noSharesExec.toFixed(0)}sh)` : (e.market_liquidity ? `$${(e.market_liquidity/2).toLocaleString(undefined, {maximumFractionDigits: 0})}` : '-');
 
                                 // Format timing info
                                 const timing = e.timing;
