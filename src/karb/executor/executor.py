@@ -1113,41 +1113,90 @@ class OrderExecutor:
                 status=no_result.status.value,
             )
 
-        # FOK orders should resolve immediately - if status is SUBMITTED (live/delayed),
-        # that's unexpected for FOK. Cancel immediately instead of waiting 10 seconds.
-        yes_unexpected_fok = yes_result.status == ExecutionStatus.SUBMITTED and yes_result.order_id
-        no_unexpected_fok = no_result.status == ExecutionStatus.SUBMITTED and no_result.order_id
+        # Handle FOK orders that didn't immediately fill
+        # - PENDING (delayed): Wait briefly for matching engine to process
+        # - SUBMITTED (live): Cancel immediately - FOK shouldn't be on the book
+        yes_needs_handling = yes_result.status in (ExecutionStatus.PENDING, ExecutionStatus.SUBMITTED) and yes_result.order_id
+        no_needs_handling = no_result.status in (ExecutionStatus.PENDING, ExecutionStatus.SUBMITTED) and no_result.order_id
 
-        if yes_unexpected_fok or no_unexpected_fok:
-            log.warning(
-                "FOK orders returned unexpected 'live' status - cancelling immediately",
-                yes_status=yes_result.status.value if yes_result.order_id else None,
-                no_status=no_result.status.value if no_result.order_id else None,
-            )
+        if yes_needs_handling or no_needs_handling:
+            # If status is PENDING (delayed), wait briefly for matching engine
+            if yes_result.status == ExecutionStatus.PENDING or no_result.status == ExecutionStatus.PENDING:
+                log.info(
+                    "FOK orders in 'delayed' state - waiting for matching engine",
+                    yes_status=yes_result.status.value if yes_result.order_id else None,
+                    no_status=no_result.status.value if no_result.order_id else None,
+                )
+                await asyncio.sleep(0.3)  # 300ms for matching engine
 
-            # Cancel any orders that are unexpectedly live (shouldn't happen with FOK)
-            async_client = self._async_client
-            if yes_unexpected_fok and yes_result.order_id:
-                try:
-                    if async_client:
-                        await async_client.cancel_order(yes_result.order_id)
-                    log.info("Cancelled unexpected live YES order", order_id=yes_result.order_id[:20])
-                    yes_result.status = ExecutionStatus.CANCELLED
-                    yes_result.filled_size = Decimal("0")
-                    self._update_order_status(yes_result.order_id, "cancelled", 0)
-                except Exception as e:
-                    log.error("Failed to cancel YES order", error=str(e))
+                # Re-check order status
+                async_client = self._async_client
+                if async_client and yes_needs_handling and yes_result.order_id:
+                    try:
+                        order_info = await async_client.get_order(yes_result.order_id)
+                        new_status = order_info.get("status", "").lower()
+                        log.debug("YES order status after wait", status=new_status)
+                        if new_status in ("filled", "matched"):
+                            yes_result.status = ExecutionStatus.FILLED
+                            yes_result.filled_size = yes_result.size
+                            self._update_order_status(yes_result.order_id, "filled", float(yes_result.size))
+                            yes_needs_handling = False
+                        elif new_status in ("canceled", "cancelled", "not_matched", "expired"):
+                            yes_result.status = ExecutionStatus.CANCELLED
+                            yes_result.filled_size = Decimal("0")
+                            self._update_order_status(yes_result.order_id, "cancelled", 0)
+                            yes_needs_handling = False
+                    except Exception as e:
+                        log.debug("Failed to check YES order status", error=str(e))
 
-            if no_unexpected_fok and no_result.order_id:
-                try:
-                    if async_client:
-                        await async_client.cancel_order(no_result.order_id)
-                    log.info("Cancelled unexpected live NO order", order_id=no_result.order_id[:20])
-                    no_result.status = ExecutionStatus.CANCELLED
-                    no_result.filled_size = Decimal("0")
-                    self._update_order_status(no_result.order_id, "cancelled", 0)
-                except Exception as e:
-                    log.error("Failed to cancel NO order", error=str(e))
+                if async_client and no_needs_handling and no_result.order_id:
+                    try:
+                        order_info = await async_client.get_order(no_result.order_id)
+                        new_status = order_info.get("status", "").lower()
+                        log.debug("NO order status after wait", status=new_status)
+                        if new_status in ("filled", "matched"):
+                            no_result.status = ExecutionStatus.FILLED
+                            no_result.filled_size = no_result.size
+                            self._update_order_status(no_result.order_id, "filled", float(no_result.size))
+                            no_needs_handling = False
+                        elif new_status in ("canceled", "cancelled", "not_matched", "expired"):
+                            no_result.status = ExecutionStatus.CANCELLED
+                            no_result.filled_size = Decimal("0")
+                            self._update_order_status(no_result.order_id, "cancelled", 0)
+                            no_needs_handling = False
+                    except Exception as e:
+                        log.debug("Failed to check NO order status", error=str(e))
+
+            # Cancel any orders still in SUBMITTED/PENDING state (shouldn't happen with FOK)
+            if yes_needs_handling or no_needs_handling:
+                log.warning(
+                    "FOK orders still pending after wait - cancelling",
+                    yes_status=yes_result.status.value if yes_needs_handling else None,
+                    no_status=no_result.status.value if no_needs_handling else None,
+                )
+
+                async_client = self._async_client
+                if yes_needs_handling and yes_result.order_id:
+                    try:
+                        if async_client:
+                            await async_client.cancel_order(yes_result.order_id)
+                        log.info("Cancelled pending YES order", order_id=yes_result.order_id[:20])
+                        yes_result.status = ExecutionStatus.CANCELLED
+                        yes_result.filled_size = Decimal("0")
+                        self._update_order_status(yes_result.order_id, "cancelled", 0)
+                    except Exception as e:
+                        log.error("Failed to cancel YES order", error=str(e))
+
+                if no_needs_handling and no_result.order_id:
+                    try:
+                        if async_client:
+                            await async_client.cancel_order(no_result.order_id)
+                        log.info("Cancelled pending NO order", order_id=no_result.order_id[:20])
+                        no_result.status = ExecutionStatus.CANCELLED
+                        no_result.filled_size = Decimal("0")
+                        self._update_order_status(no_result.order_id, "cancelled", 0)
+                    except Exception as e:
+                        log.error("Failed to cancel NO order", error=str(e))
 
         # Determine overall status
         if yes_result.status == ExecutionStatus.FILLED and no_result.status == ExecutionStatus.FILLED:
@@ -1309,6 +1358,12 @@ class OrderExecutor:
             if status_str in ("filled", "matched"):
                 status = ExecutionStatus.FILLED
                 filled_size = size
+            elif status_str == "delayed":
+                # 'delayed' means the matching engine is processing - for FOK this often
+                # resolves to 'matched' within milliseconds. Treat as PENDING not SUBMITTED
+                # to avoid immediate cancellation.
+                status = ExecutionStatus.PENDING
+                filled_size = Decimal("0")
             elif status_str in ("open", "live", "pending"):
                 status = ExecutionStatus.SUBMITTED
                 filled_size = Decimal("0")
