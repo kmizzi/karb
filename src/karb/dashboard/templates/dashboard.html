@@ -17,6 +17,7 @@
             --accent-red: #f85149;
             --accent-blue: #58a6ff;
             --accent-yellow: #d29922;
+            --accent-orange: #f59e0b;
             --accent-purple: #a371f7;
             --border: #30363d;
         }
@@ -1463,10 +1464,19 @@
                                 let displayStatus = e.status.toUpperCase();
                                 let statusColor = 'var(--accent-red)';
 
+                                // Check if both sides failed due to FOK liquidity constraints
+                                const yesHasFokError = e.yes_order.error && (e.yes_order.error.includes('FOK') || e.yes_order.error.includes('fully filled'));
+                                const noHasFokError = e.no_order.error && (e.no_order.error.includes('FOK') || e.no_order.error.includes('fully filled'));
+                                const bothFokFailed = yesHasFokError && noHasFokError;
+
                                 if (e.status === 'filled') {
                                     statusColor = 'var(--accent-green)';
                                 } else if (e.status === 'cancelled') {
                                     statusColor = 'var(--accent-blue)';
+                                } else if (bothFokFailed) {
+                                    // Both sides failed due to insufficient liquidity (FOK orders couldn't fill)
+                                    displayStatus = 'ILLIQUID';
+                                    statusColor = 'var(--accent-orange, #f59e0b)';
                                 } else if (e.status === 'partial') {
                                     statusColor = 'var(--accent-yellow)';
                                     // More descriptive partial statuses
