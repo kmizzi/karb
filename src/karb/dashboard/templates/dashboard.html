@@ -891,8 +891,13 @@
 
         async function fetchBalance() {
             try {
-                const resp = await fetch('/api/balance');
-                const data = await resp.json();
+                // Fetch both balance and positions
+                const [balanceResp, positionsResp] = await Promise.all([
+                    fetch('/api/balance'),
+                    fetch('/api/positions')
+                ]);
+                const data = await balanceResp.json();
+                const positionsData = await positionsResp.json();
 
                 if (data.error) {
                     document.getElementById('balance-content').innerHTML = `
@@ -900,12 +905,34 @@
                         <div class="stat-label">${data.error}</div>
                     `;
                 } else {
+                    // Calculate positions expected value
+                    const openPositions = positionsData.open || [];
+                    const positionsExpectedValue = openPositions.reduce((sum, p) => {
+                        return sum + (p.current_value || (p.size * (p.current_price || 0)));
+                    }, 0);
+                    const positionsUnrealizedPnl = openPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+
+                    // Total = USDC + Positions Expected Value
+                    const totalValue = data.polymarket_usdc + positionsExpectedValue;
+                    const pnlColor = positionsUnrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                    const pnlSign = positionsUnrealizedPnl >= 0 ? '+' : '';
+
                     document.getElementById('balance-content').innerHTML = `
-                        <div class="stat-value">$${data.total_usd.toFixed(2)}</div>
+                        <div class="stat-value">$${totalValue.toFixed(2)}</div>
                         <div class="stat-row">
                             <span>Polymarket (USDC)</span>
                             <span>$${data.polymarket_usdc.toFixed(2)}</span>
                         </div>
+                        <div class="stat-row">
+                            <span>Positions (${openPositions.length})</span>
+                            <span>$${positionsExpectedValue.toFixed(2)}</span>
+                        </div>
+                        ${positionsExpectedValue > 0 ? `
+                        <div class="stat-row">
+                            <span>Unrealized P&L</span>
+                            <span style="color: ${pnlColor};">${pnlSign}$${positionsUnrealizedPnl.toFixed(2)}</span>
+                        </div>
+                        ` : ''}
                     `;
                 }
             } catch (e) {
