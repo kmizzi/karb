@@ -676,6 +676,20 @@
             </div>
         </div>
 
+        <!-- Daily Balance Chart -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title">💰 Daily Balance (Last 30d, PST)</span>
+                <span class="refresh-indicator">Live</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="balance-chart"></canvas>
+            </div>
+            <div id="balance-chart-empty" class="chart-empty" style="display: none;">
+                No balance data yet. Chart will populate when portfolio snapshots are recorded.
+            </div>
+        </div>
+
         <!-- Live Activity Feed -->
         <div class="terminal">
             <div class="terminal-header">
@@ -1700,6 +1714,7 @@
         let alertsChart = null;
         let nearMissChart = null;
         let dailyChart = null;
+        let balanceChart = null;
 
         // Chart.js default configuration for dark theme
         Chart.defaults.color = '#8b949e';
@@ -2121,6 +2136,119 @@
             }
         }
 
+        async function fetchBalanceChart() {
+            try {
+                const resp = await fetch('/api/charts/daily-balance?days=30');
+                const data = await resp.json();
+
+                const canvas = document.getElementById('balance-chart');
+                const emptyMsg = document.getElementById('balance-chart-empty');
+
+                if (data.count === 0) {
+                    canvas.style.display = 'none';
+                    emptyMsg.style.display = 'flex';
+                    return;
+                }
+
+                canvas.style.display = 'block';
+                emptyMsg.style.display = 'none';
+
+                // Format dates for display (MM/DD)
+                const labels = data.dates.map(d => {
+                    const parts = d.split('-');
+                    return `${parts[1]}/${parts[2]}`;
+                });
+
+                const chartData = {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Total',
+                            data: data.total,
+                            borderColor: '#58a6ff',
+                            backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 3,
+                            order: 1,
+                        },
+                        {
+                            label: 'USDC',
+                            data: data.usdc,
+                            borderColor: '#3fb950',
+                            backgroundColor: 'transparent',
+                            borderDash: [5, 5],
+                            tension: 0.3,
+                            pointRadius: 2,
+                            order: 2,
+                        },
+                        {
+                            label: 'Positions',
+                            data: data.positions_value,
+                            borderColor: '#a371f7',
+                            backgroundColor: 'transparent',
+                            borderDash: [5, 5],
+                            tension: 0.3,
+                            pointRadius: 2,
+                            order: 3,
+                        }
+                    ]
+                };
+
+                const config = {
+                    type: 'line',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: {
+                                    usePointStyle: true,
+                                    padding: 20,
+                                }
+                            },
+                            tooltip: {
+                                backgroundColor: '#21262d',
+                                borderColor: '#30363d',
+                                borderWidth: 1,
+                                callbacks: {
+                                    label: function(context) {
+                                        return `${context.dataset.label}: $${context.parsed.y.toFixed(2)}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { display: false }
+                            },
+                            y: {
+                                grid: { color: 'rgba(48, 54, 61, 0.5)' },
+                                ticks: {
+                                    callback: (v) => '$' + v.toFixed(0)
+                                }
+                            }
+                        }
+                    }
+                };
+
+                if (balanceChart) {
+                    balanceChart.data = chartData;
+                    balanceChart.update('none');
+                } else {
+                    balanceChart = new Chart(canvas, config);
+                }
+            } catch (e) {
+                console.error('Balance chart fetch error:', e);
+            }
+        }
+
         // Initial load
         addLogLine('info', 'Dashboard initialized');
         fetchStatus();
@@ -2137,6 +2265,7 @@
         fetchAlertsChart();
         fetchNearMissChart();
         fetchDailyChart();
+        fetchBalanceChart();
 
         // Refresh intervals
         setInterval(fetchStatus, 5000);      // Status every 5s
@@ -2153,6 +2282,7 @@
         setInterval(fetchAlertsChart, 30000);  // Alerts chart every 30s
         setInterval(fetchNearMissChart, 30000);  // Near-miss chart every 30s
         setInterval(fetchDailyChart, 60000);  // Daily chart every minute
+        setInterval(fetchBalanceChart, 60000);  // Balance chart every minute
 
         addLogLine('info', 'Live updates enabled');
     </script>

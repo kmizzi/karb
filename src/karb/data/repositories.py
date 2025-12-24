@@ -581,6 +581,61 @@ class PortfolioRepository:
                 }
             return {}
 
+    # PST timezone for daily aggregation
+    PST = ZoneInfo("America/Los_Angeles")
+
+    @staticmethod
+    async def get_daily_balances(days: int = 30) -> list[dict[str, Any]]:
+        """Get daily balance snapshots (last snapshot per day in PST).
+
+        Returns the last balance reading for each day, which represents
+        the end-of-day balance. Includes USDC + positions value.
+        """
+        async with get_async_db() as conn:
+            # SQLite doesn't have native timezone support, so we need to
+            # adjust the timestamp to PST (-8 or -7 depending on DST).
+            # For simplicity, use -8 hours (PST standard).
+            # This groups by PST date and takes the last (max) snapshot per day.
+            cursor = await conn.execute(
+                """
+                SELECT
+                    DATE(timestamp, '-8 hours') as date,
+                    MAX(id) as last_snapshot_id
+                FROM portfolio_snapshots
+                WHERE timestamp >= DATE('now', ? || ' days')
+                GROUP BY DATE(timestamp, '-8 hours')
+                ORDER BY date ASC
+                """,
+                (f"-{days}",),
+            )
+            date_ids = await cursor.fetchall()
+
+            if not date_ids:
+                return []
+
+            # Fetch the actual snapshot data for each day's last snapshot
+            result = []
+            for row in date_ids:
+                snapshot_id = row["last_snapshot_id"]
+                cursor = await conn.execute(
+                    """
+                    SELECT timestamp, polymarket_usdc, total_usd, positions_value
+                    FROM portfolio_snapshots WHERE id = ?
+                    """,
+                    (snapshot_id,),
+                )
+                snapshot = await cursor.fetchone()
+                if snapshot:
+                    result.append({
+                        "date": row["date"],
+                        "timestamp": snapshot["timestamp"],
+                        "usdc": float(snapshot["polymarket_usdc"] or 0),
+                        "positions_value": float(snapshot["positions_value"] or 0),
+                        "total": float(snapshot["polymarket_usdc"] or 0) + float(snapshot["positions_value"] or 0),
+                    })
+
+            return result
+
 
 class ClosedPositionRepository:
     """Repository for closed position history."""

@@ -17,6 +17,7 @@ from karb.data.repositories import (
     ClosedPositionRepository,
     ExecutionRepository,
     MinuteStatsRepository,
+    PortfolioRepository,
     StatsHistoryRepository,
     StatsRepository,
     TradeRepository,
@@ -559,6 +560,21 @@ def create_app() -> FastAPI:
         """Get arbitrage window duration statistics."""
         stats = await AlertRepository.get_window_stats()
         return stats
+
+    @app.get("/api/charts/daily-balance")
+    async def get_daily_balance_chart_data(
+        days: int = 30,
+        username: str = Depends(verify_credentials),
+    ):
+        """Get daily balance data for charting (USDC + positions value, PST timezone)."""
+        data = await PortfolioRepository.get_daily_balances(days=days)
+        return {
+            "dates": [d.get("date", "") for d in data],
+            "usdc": [d.get("usdc", 0) for d in data],
+            "positions_value": [d.get("positions_value", 0) for d in data],
+            "total": [d.get("total", 0) for d in data],
+            "count": len(data),
+        }
 
     return app
 
