@@ -1166,6 +1166,11 @@
                         const minSharesRequired = alert.min_required || 10;
                         // Min required in dollars uses the cheaper side (NO) price
                         const minDollarRequired = minSharesRequired * Math.min(alert.yes_ask || 1, alert.no_ask || 1);
+                        // Determine which side is the bottleneck
+                        const yesIsBottleneck = yesDollarLiq <= noDollarLiq;
+                        const yesColor = yesIsBottleneck ? 'var(--accent-red)' : '#888';
+                        const noColor = !yesIsBottleneck ? 'var(--accent-red)' : '#888';
+                        const bottleneckSide = yesIsBottleneck ? 'YES' : 'NO';
 
                         return `
                         <div class="alert-item" style="border-left: 3px solid var(--accent-yellow);">
@@ -1180,8 +1185,12 @@
                                 <span class="alert-profit">+${((alert.profit_pct || 0) * 100).toFixed(2)}%</span>
                             </div>
                             <div class="alert-details" style="margin-top: 4px;">
-                                <span style="color: var(--accent-red);">Liquidity: $${minDollarLiq.toFixed(2)} (need $${minDollarRequired.toFixed(2)})</span>
-                                <span style="margin-left: 12px; color: #888;">YES: $${yesDollarLiq.toFixed(2)} (${yesShares.toFixed(0)} sh) | NO: $${noDollarLiq.toFixed(2)} (${noShares.toFixed(0)} sh)</span>
+                                <span style="color: var(--accent-red);">Liquidity: $${minDollarLiq.toFixed(2)} (need $${minDollarRequired.toFixed(2)}) - <b>${bottleneckSide} side</b></span>
+                            </div>
+                            <div class="alert-details" style="margin-top: 2px;">
+                                <span style="color: ${yesColor}; ${yesIsBottleneck ? 'font-weight: bold;' : ''}">YES: $${yesDollarLiq.toFixed(2)} (${yesShares.toFixed(0)} sh)</span>
+                                <span style="margin: 0 8px; color: #666;">|</span>
+                                <span style="color: ${noColor}; ${!yesIsBottleneck ? 'font-weight: bold;' : ''}">NO: $${noDollarLiq.toFixed(2)} (${noShares.toFixed(0)} sh)</span>
                                 <span style="margin-left: 12px; color: #666;">Spotted: ${alertTime}</span>
                             </div>
                         </div>
