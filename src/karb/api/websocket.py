@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Callable, Optional
@@ -104,6 +105,10 @@ class WebSocketClient:
         self._orderbooks: dict[str, OrderBookUpdate] = {}
         self._best_prices: dict[str, tuple[Optional[Decimal], Optional[Decimal]]] = {}
 
+        # Track last message time for zombie connection detection
+        self._last_message_time: float = 0.0
+        self._message_count: int = 0
+
     async def connect(self) -> None:
         """Connect to the WebSocket server."""
         log.info("Connecting to Polymarket WebSocket", url=WS_MARKET_URL)
@@ -117,6 +122,7 @@ class WebSocketClient:
             )
             self._running = True
             self._reconnect_delay = 1.0  # Reset on successful connect
+            self._last_message_time = time.time()  # Reset for watchdog
             log.info("WebSocket connected")
             # Don't auto-resubscribe here - caller will call subscribe()
 
@@ -188,6 +194,10 @@ class WebSocketClient:
 
     async def _handle_message(self, raw_message: str) -> None:
         """Handle incoming WebSocket message."""
+        # Track message receipt for zombie connection detection
+        self._last_message_time = time.time()
+        self._message_count += 1
+
         # Ignore empty messages (heartbeats, etc.)
         if not raw_message or not raw_message.strip():
             return
@@ -371,3 +381,15 @@ class WebSocketClient:
     def subscribed_count(self) -> int:
         """Number of subscribed assets."""
         return len(self._subscribed_assets)
+
+    @property
+    def last_message_time(self) -> float:
+        """Timestamp of last received message (for zombie detection)."""
+        return self._last_message_time
+
+    @property
+    def seconds_since_last_message(self) -> float:
+        """Seconds since last message received."""
+        if self._last_message_time == 0:
+            return 0.0
+        return time.time() - self._last_message_time

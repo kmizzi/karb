@@ -504,6 +504,7 @@ class RealtimeScanner:
         tasks.extend([
             self._periodic_market_refresh(),
             self._periodic_stats(),
+            self._zombie_connection_watchdog(),
         ])
         await asyncio.gather(*tasks)
 
@@ -561,6 +562,46 @@ class RealtimeScanner:
             except Exception as e:
                 log.error("Market refresh error", error=str(e))
 
+    async def _zombie_connection_watchdog(self, check_interval: float = 30, stale_threshold: float = 60) -> None:
+        """
+        Watchdog to detect and fix zombie WebSocket connections.
+
+        A zombie connection appears connected (state=OPEN) but isn't receiving
+        any data. This happens when the remote server silently drops us without
+        sending a close frame.
+
+        Args:
+            check_interval: How often to check connections (seconds)
+            stale_threshold: How long without messages before forcing reconnect (seconds)
+        """
+        # Wait a bit for initial connections to receive data
+        await asyncio.sleep(check_interval)
+
+        while self._running:
+            for i, client in enumerate(self.ws_clients):
+                if not client.is_connected:
+                    continue
+
+                seconds_silent = client.seconds_since_last_message
+
+                # If connection has been silent for too long, it's probably a zombie
+                if seconds_silent > stale_threshold:
+                    log.warning(
+                        "Zombie connection detected - forcing reconnect",
+                        conn_id=i + 1,
+                        seconds_silent=f"{seconds_silent:.0f}s",
+                        threshold=f"{stale_threshold:.0f}s",
+                    )
+
+                    # Force close the connection to trigger reconnect
+                    try:
+                        if client._ws:
+                            await client._ws.close(code=4000, reason="Zombie connection detected")
+                    except Exception as e:
+                        log.debug("Error closing zombie connection", error=str(e))
+
+            await asyncio.sleep(check_interval)
+
     async def _periodic_stats(self, interval: float = 60) -> None:
         """Log periodic statistics and write to shared state file."""
         while self._running:
@@ -575,12 +616,19 @@ class RealtimeScanner:
                 best_spread = f"{float(self._best_near_miss) * 100:.3f}%"
                 best_spread_market = getattr(self, '_best_near_miss_market', None)
 
+            # Get connection health info
+            connection_ages = [
+                f"{int(c.seconds_since_last_message)}s" if c.is_connected else "down"
+                for c in self.ws_clients
+            ]
+
             log.info(
                 "Scanner stats",
                 markets=stats["markets"],
                 price_updates=stats["price_updates"],
                 arbitrage_alerts=stats["arbitrage_alerts"],
                 ws_connections=stats["ws_connections"],
+                conn_ages=",".join(connection_ages),
                 best_spread=best_spread,
             )
 
