@@ -919,15 +919,26 @@
                         <div class="stat-label">${data.error}</div>
                     `;
                 } else {
-                    // Calculate positions expected value
+                    // Calculate open positions expected value
                     const openPositions = positionsData.open || [];
-                    const positionsExpectedValue = openPositions.reduce((sum, p) => {
+                    const openPositionsValue = openPositions.reduce((sum, p) => {
                         return sum + (p.current_value || (p.size * (p.current_price || 0)));
                     }, 0);
                     const positionsUnrealizedPnl = openPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
 
-                    // Total = USDC + Positions Expected Value
-                    const totalValue = data.polymarket_usdc + positionsExpectedValue;
+                    // Calculate pending redemption value (WON positions = $1/share, LOST = $0)
+                    const closedPositions = positionsData.closed || [];
+                    const pendingRedemption = closedPositions.reduce((sum, p) => {
+                        // WON positions are worth $1 per share
+                        if (p.status === 'WON' && p.redeemable) {
+                            return sum + (p.size || 0);
+                        }
+                        return sum;
+                    }, 0);
+                    const pendingCount = closedPositions.filter(p => p.status === 'WON' && p.redeemable).length;
+
+                    // Total = USDC + Open Positions + Pending Redemption
+                    const totalValue = data.polymarket_usdc + openPositionsValue + pendingRedemption;
                     const pnlColor = positionsUnrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
                     const pnlSign = positionsUnrealizedPnl >= 0 ? '+' : '';
 
@@ -937,11 +948,19 @@
                             <span>Polymarket (USDC)</span>
                             <span>$${data.polymarket_usdc.toFixed(2)}</span>
                         </div>
+                        ${openPositions.length > 0 ? `
                         <div class="stat-row">
-                            <span>Positions (${openPositions.length})</span>
-                            <span>$${positionsExpectedValue.toFixed(2)}</span>
+                            <span>Open Positions (${openPositions.length})</span>
+                            <span>$${openPositionsValue.toFixed(2)}</span>
                         </div>
-                        ${positionsExpectedValue > 0 ? `
+                        ` : ''}
+                        ${pendingRedemption > 0 ? `
+                        <div class="stat-row">
+                            <span>Pending Redemption (${pendingCount})</span>
+                            <span style="color: var(--accent-green);">$${pendingRedemption.toFixed(2)}</span>
+                        </div>
+                        ` : ''}
+                        ${positionsUnrealizedPnl !== 0 ? `
                         <div class="stat-row">
                             <span>Unrealized P&L</span>
                             <span style="color: ${pnlColor};">${pnlSign}$${positionsUnrealizedPnl.toFixed(2)}</span>
