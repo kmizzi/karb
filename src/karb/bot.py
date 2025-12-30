@@ -239,6 +239,9 @@ class RealtimeArbitrageBot:
     # How often to record minute-level stats (in seconds)
     MINUTE_STATS_INTERVAL = 60  # 1 minute
 
+    # How often to refresh the cached balance (in seconds)
+    BALANCE_REFRESH_INTERVAL = 60  # 1 minute
+
     def __init__(self) -> None:
         from karb.scanner.realtime_scanner import RealtimeScanner
 
@@ -259,8 +262,13 @@ class RealtimeArbitrageBot:
         self._redemption_task: Optional[asyncio.Task] = None
         self._stats_history_task: Optional[asyncio.Task] = None
         self._minute_stats_task: Optional[asyncio.Task] = None
+        self._balance_refresh_task: Optional[asyncio.Task] = None
         self._last_price_updates: int = 0  # Track delta for hourly stats
         self._last_minute_price_updates: int = 0  # Track delta for minute stats
+
+        # Cached USDC balance (updated periodically and after trades)
+        self._cached_balance: Decimal = Decimal("0")
+        self._balance_lock = asyncio.Lock()
 
     async def _on_markets_loaded(self, markets: list) -> None:
         """
@@ -310,6 +318,27 @@ class RealtimeArbitrageBot:
         except Exception as e:
             log.debug("Failed to save near-miss alert", error=str(e))
 
+    async def _save_insufficient_balance_alert(self, alert, required: Decimal, available: Decimal) -> None:
+        """Save an alert for when balance is insufficient."""
+        from datetime import datetime, timezone
+        from karb.data.repositories import NearMissAlertRepository
+
+        try:
+            await NearMissAlertRepository.insert(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                market=alert.market.question[:60],
+                yes_ask=float(alert.yes_ask),
+                no_ask=float(alert.no_ask),
+                combined=float(alert.combined_cost),
+                profit_pct=float(alert.profit_pct),
+                yes_liquidity=float(alert.yes_size_available),
+                no_liquidity=float(alert.no_size_available),
+                min_required=float(required),
+                reason=f"insufficient_balance (need ${float(required):.2f}, have ${float(available):.2f})",
+            )
+        except Exception as e:
+            log.debug("Failed to save insufficient balance alert", error=str(e))
+
     async def _on_arbitrage(self, alert) -> None:
         """Handle arbitrage alert from scanner."""
         from karb.api.models import ArbitrageOpportunity
@@ -341,6 +370,39 @@ class RealtimeArbitrageBot:
 
         trade_size = min(available_size, max_position)
 
+        # Check if we have sufficient balance for this trade
+        # Cost = trade_size * combined_cost (buying both YES and NO)
+        required_cost = trade_size * alert.combined_cost
+
+        async with self._balance_lock:
+            current_balance = self._cached_balance
+
+        if current_balance < required_cost:
+            # Try to reduce trade size to fit available balance
+            if current_balance >= min_required_size * alert.combined_cost:
+                # We have enough for at least minimum trade
+                max_affordable_size = current_balance / alert.combined_cost
+                trade_size = min(trade_size, max_affordable_size.quantize(Decimal("1"), rounding="ROUND_DOWN"))
+                required_cost = trade_size * alert.combined_cost
+                log.info(
+                    "Reduced trade size to fit balance",
+                    market=alert.market.question[:40],
+                    original_size=float(available_size),
+                    adjusted_size=float(trade_size),
+                    balance=float(current_balance),
+                )
+            else:
+                # Not enough balance for even minimum trade
+                log.warning(
+                    "Skipping arbitrage - insufficient balance",
+                    market=alert.market.question[:40],
+                    required=float(required_cost),
+                    available=float(current_balance),
+                )
+                # Save near-miss alert for visibility
+                asyncio.create_task(self._save_insufficient_balance_alert(alert, required_cost, current_balance))
+                return
+
         opportunity = ArbitrageOpportunity(
             market=alert.market,
             yes_ask=alert.yes_ask,
@@ -358,7 +420,12 @@ class RealtimeArbitrageBot:
             trade_size=float(trade_size),
             yes_liquidity=float(alert.yes_size_available),
             no_liquidity=float(alert.no_size_available),
+            balance=float(current_balance),
         )
+
+        # Deduct expected cost from cached balance immediately to prevent over-trading
+        async with self._balance_lock:
+            self._cached_balance -= required_cost
 
         # Execute immediately (with lock to prevent concurrent executions)
         async with self._execution_lock:
@@ -377,8 +444,21 @@ class RealtimeArbitrageBot:
                         market=alert.market.question[:30],
                         profit=f"${float(result.expected_profit):.2f}",
                     )
+                else:
+                    # Trade failed/partial - restore deducted balance
+                    # (actual balance will be corrected on next refresh)
+                    async with self._balance_lock:
+                        self._cached_balance += required_cost
+                    log.debug(
+                        "Restored balance after failed trade",
+                        restored=float(required_cost),
+                        status=result.status.value,
+                    )
 
             except Exception as e:
+                # Restore balance on exception
+                async with self._balance_lock:
+                    self._cached_balance += required_cost
                 log.error(
                     "Execution error",
                     market=alert.market.question[:30],
@@ -519,6 +599,41 @@ class RealtimeArbitrageBot:
             # Wait for next record
             await asyncio.sleep(self.MINUTE_STATS_INTERVAL)
 
+    async def _refresh_balance(self) -> Decimal:
+        """Fetch current USDC balance from chain and update cache."""
+        from karb.tracking.portfolio import PortfolioTracker
+
+        try:
+            tracker = PortfolioTracker()
+            balances = await tracker.get_current_balances()
+            balance = Decimal(str(balances.get("polymarket_usdc", 0)))
+
+            async with self._balance_lock:
+                self._cached_balance = balance
+
+            log.debug("Balance refreshed", balance=f"${float(balance):.2f}")
+            return balance
+        except Exception as e:
+            log.error("Failed to refresh balance", error=str(e))
+            return self._cached_balance
+
+    async def _balance_refresh_loop(self) -> None:
+        """Background task that periodically refreshes the cached balance."""
+        # Initial fetch
+        balance = await self._refresh_balance()
+        log.info(
+            "Balance tracking initialized",
+            balance=f"${float(balance):.2f}",
+            interval=f"{self.BALANCE_REFRESH_INTERVAL}s",
+        )
+
+        while self._running:
+            await asyncio.sleep(self.BALANCE_REFRESH_INTERVAL)
+            try:
+                await self._refresh_balance()
+            except Exception as e:
+                log.error("Balance refresh loop error", error=str(e))
+
     async def run(self) -> None:
         """Run the real-time bot."""
         settings = get_settings()
@@ -548,6 +663,10 @@ class RealtimeArbitrageBot:
         if not settings.dry_run:
             self._redemption_task = asyncio.create_task(self._auto_redemption_loop())
             log.info("Auto-redemption task scheduled")
+
+            # Start balance tracking for trade validation
+            self._balance_refresh_task = asyncio.create_task(self._balance_refresh_loop())
+            log.info("Balance refresh task scheduled")
 
         # Always start stats history task (for monitoring)
         self._stats_history_task = asyncio.create_task(self._stats_history_loop())
@@ -599,6 +718,14 @@ class RealtimeArbitrageBot:
             except asyncio.CancelledError:
                 pass
             log.info("Minute stats task cancelled")
+
+        if self._balance_refresh_task and not self._balance_refresh_task.done():
+            self._balance_refresh_task.cancel()
+            try:
+                await self._balance_refresh_task
+            except asyncio.CancelledError:
+                pass
+            log.info("Balance refresh task cancelled")
 
         # Send shutdown notification
         try:
