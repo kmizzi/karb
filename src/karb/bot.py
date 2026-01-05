@@ -351,8 +351,14 @@ class RealtimeArbitrageBot:
 
         # Convert alert to opportunity
         # Limit trade size to available liquidity on BOTH sides
+        # Apply 50% safety margin to account for:
+        # - Liquidity changes during execution (can take 1-20+ seconds)
+        # - Other traders taking the same opportunity
+        # - Order book depth inaccuracies
+        LIQUIDITY_SAFETY_MARGIN = Decimal("0.50")  # Only use 50% of available liquidity
         max_position = Decimal(str(settings.max_position_size))
-        available_size = min(alert.yes_size_available, alert.no_size_available)
+        raw_available = min(alert.yes_size_available, alert.no_size_available)
+        available_size = (raw_available * LIQUIDITY_SAFETY_MARGIN).quantize(Decimal("1"), rounding="ROUND_DOWN")
 
         # Calculate minimum shares needed so BOTH orders meet Polymarket's $1 minimum
         # Formula: shares = $1.10 / price (using $1.10 for safety margin)

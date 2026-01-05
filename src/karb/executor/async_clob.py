@@ -122,21 +122,49 @@ class AsyncClobClient:
         self.proxy_url = proxy_url
 
         # Async HTTP client with connection pooling
+        # Use higher connection limits for parallel requests
+        limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
         transport = None
         if proxy_url:
-            transport = httpx.AsyncHTTPTransport(proxy=proxy_url)
+            transport = httpx.AsyncHTTPTransport(proxy=proxy_url, limits=limits)
 
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=5.0),
+            timeout=httpx.Timeout(30.0, connect=10.0),  # Increased timeout for slow proxy
             transport=transport,
             http2=True,  # Use HTTP/2 for better performance
+            limits=limits,
         )
+        self._warmed_up = False
 
         # Cache for tick sizes and neg_risk status
         self._tick_sizes: dict[str, str] = {}
         self._neg_risk: dict[str, bool] = {}
 
         log.info("AsyncClobClient initialized", address=self.address)
+
+    async def warmup(self, num_connections: int = 2):
+        """
+        Warm up the connection pool by making parallel requests.
+
+        We need multiple connections warm for parallel order submission.
+        Each parallel request needs its own connection to avoid head-of-line blocking.
+        """
+        if self._warmed_up:
+            return
+        try:
+            t0 = time.time()
+            # Make parallel GET requests to establish multiple connections
+            # This ensures both connections are ready for parallel POST orders
+            warmup_tasks = [
+                self._client.get(f"{self.host}/tick-sizes")
+                for _ in range(num_connections)
+            ]
+            await asyncio.gather(*warmup_tasks)
+            elapsed = int((time.time() - t0) * 1000)
+            log.info("Connection warmup complete", elapsed_ms=elapsed, connections=num_connections)
+            self._warmed_up = True
+        except Exception as e:
+            log.warning("Connection warmup failed", error=str(e))
 
     async def close(self):
         """Close the HTTP client."""
@@ -343,6 +371,7 @@ class AsyncClobClient:
 
         This is the network-bound part - fully async.
         """
+        t0 = time.time()
         path = "/order"
         body = {
             "order": signed_order.to_dict(),
@@ -353,12 +382,29 @@ class AsyncClobClient:
         # Serialize with exact formatting for signature
         body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
         headers = self._get_l2_headers("POST", path, body_str)
+        t1 = time.time()
 
         response = await self._client.post(
             f"{self.host}{path}",
             headers=headers,
             content=body_str,
         )
+        t2 = time.time()
+
+        # Log detailed timing for debugging slow requests
+        prep_ms = int((t1 - t0) * 1000)
+        http_ms = int((t2 - t1) * 1000)
+        # httpx provides elapsed time which includes connection time
+        elapsed_ms = int(response.elapsed.total_seconds() * 1000) if response.elapsed else http_ms
+
+        if http_ms > 1000:  # Log if over 1 second
+            log.warning(
+                "Slow order POST",
+                prep_ms=prep_ms,
+                http_ms=http_ms,
+                elapsed_ms=elapsed_ms,
+                status=response.status_code,
+            )
 
         if response.status_code != 200:
             error_text = response.text
@@ -475,20 +521,44 @@ class AsyncClobClient:
         signed_orders = await asyncio.gather(*sign_tasks)
         t2 = time.time()
 
-        # Submit all orders in parallel
+        # Submit all orders in parallel with individual timing
+        async def timed_post(signed_order: SignedOrder, idx: int) -> tuple[Any, int]:
+            """Submit order and return result with timing."""
+            start = time.time()
+            try:
+                result = await self.post_order(signed_order, order_type=order_type)
+            except Exception as e:
+                result = e
+            elapsed_ms = int((time.time() - start) * 1000)
+            return result, elapsed_ms
+
         post_tasks = [
-            self.post_order(signed_order, order_type=order_type)
-            for signed_order in signed_orders
+            timed_post(signed_order, idx)
+            for idx, signed_order in enumerate(signed_orders)
         ]
 
-        results = await asyncio.gather(*post_tasks, return_exceptions=True)
+        timed_results = await asyncio.gather(*post_tasks, return_exceptions=True)
         t3 = time.time()
+
+        # Extract results and individual timings
+        results = []
+        order_timings = []
+        for item in timed_results:
+            if isinstance(item, tuple):
+                result, elapsed = item
+                results.append(result)
+                order_timings.append(elapsed)
+            else:
+                # Exception from gather itself
+                results.append(item)
+                order_timings.append(0)
 
         timing = {
             "neg_risk_ms": int((t1 - t0) * 1000),
             "sign_ms": int((t2 - t1) * 1000),
             "submit_ms": int((t3 - t2) * 1000),
             "total_ms": int((t3 - t0) * 1000),
+            "order_timings_ms": order_timings,  # Individual order times
         }
 
         log.info(
@@ -498,6 +568,7 @@ class AsyncClobClient:
             submit_ms=timing["submit_ms"],
             total_ms=timing["total_ms"],
             order_count=len(orders),
+            order_timings_ms=order_timings,
         )
 
         return results, timing

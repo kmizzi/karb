@@ -254,9 +254,12 @@ class OrderExecutor:
                 self._clob_client = None
 
     async def _ensure_async_client(self) -> Optional[AsyncClobClient]:
-        """Lazily initialize the async CLOB client."""
+        """Lazily initialize the async CLOB client and warm up connection."""
         if self._async_client is None:
             self._async_client = await create_async_clob_client()
+            # Warm up connection pool to reduce first-order latency
+            if self._async_client:
+                await self._async_client.warmup()
         return self._async_client
 
     async def close(self) -> None:
@@ -491,7 +494,8 @@ class OrderExecutor:
 
         # Sell at a discount to ensure fill (accept 2-3% loss to exit immediately)
         # This is better than holding an unhedged directional position
-        unwind_price = buy_price * 0.97  # Sell 3% below what we paid
+        # Round DOWN to tick size (0.001) to ensure valid price
+        unwind_price = round(buy_price * 0.97, 3)  # Sell 3% below what we paid
 
         log.warning(
             "Attempting emergency unwind",
@@ -1023,6 +1027,14 @@ class OrderExecutor:
                 timing.neg_risk_ms = order_timing.get("neg_risk_ms", 0)
                 timing.sign_ms = order_timing.get("sign_ms", 0)
                 timing.submit_ms = order_timing.get("submit_ms", 0)
+
+                # Store individual order timings if available
+                order_timings_ms = order_timing.get("order_timings_ms", [])
+                if len(order_timings_ms) >= 2:
+                    timing.yes_submit_start = 0  # Placeholder to trigger delta calc
+                    timing.yes_submit_end = order_timings_ms[0]  # YES order time
+                    timing.no_submit_start = 0
+                    timing.no_submit_end = order_timings_ms[1]  # NO order time
             else:
                 # Fallback to sync client wrapped in executor
                 timing.order_signing_start = ExecutionTiming.now_ms()

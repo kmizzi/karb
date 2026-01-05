@@ -163,18 +163,24 @@ class OrderSigner:
             raise ValueError("Wallet address not configured")
 
         # Convert to base units (6 decimals for both USDC and outcome tokens)
-        size_base = int(size * Decimal("1000000"))
+        # Use Decimal for precise calculations to avoid float rounding errors
+        price_dec = Decimal(str(price)).quantize(Decimal("0.001"))  # Round to tick size
+        size_dec = Decimal(str(size)).quantize(Decimal("0.000001"))
+
+        size_base = int(size_dec * Decimal("1000000"))
+        # Use ROUND_DOWN to match Polymarket's truncation behavior
+        usdc_amount = (price_dec * size_dec * Decimal("1000000")).quantize(Decimal("1"), rounding="ROUND_DOWN")
 
         if side == OrderSide.BUY:
             # Buying: maker pays USDC, receives tokens
             # maker_amount = price * size (in USDC base units)
             # taker_amount = size (in token base units)
-            maker_amount = int(price * size * Decimal("1000000"))
+            maker_amount = int(usdc_amount)
             taker_amount = size_base
         else:
             # Selling: maker pays tokens, receives USDC
             maker_amount = size_base
-            taker_amount = int(price * size * Decimal("1000000"))
+            taker_amount = int(usdc_amount)
 
         return OrderData(
             maker=self._wallet_address,
