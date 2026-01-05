@@ -172,7 +172,7 @@ class AsyncClobClient:
             if not self._warmed_up:
                 log.info("Connection warmup complete", elapsed_ms=elapsed, connections=num_connections)
             else:
-                log.debug("Connection keep-alive refresh", elapsed_ms=elapsed)
+                log.info("Connection keep-alive refresh", elapsed_ms=elapsed, connections=num_connections)
             self._warmed_up = True
         except Exception as e:
             log.warning("Connection warmup failed", error=str(e))
