@@ -535,6 +535,116 @@ def balance() -> None:
 
 
 @cli.command()
+def approve_redemption() -> None:
+    """Approve Polymarket exchange contracts for redemption.
+
+    This is required once before you can redeem resolved positions.
+    Sets approval for both CTFExchange and NegRiskCTFExchange.
+    """
+    setup_logging("INFO")
+    settings = get_settings()
+
+    if not settings.private_key:
+        console.print("[red]Error: PRIVATE_KEY not configured in .env[/red]")
+        return
+
+    if not settings.wallet_address:
+        console.print("[red]Error: WALLET_ADDRESS not configured in .env[/red]")
+        return
+
+    console.print("\n[bold]Setting up redemption approvals...[/bold]\n")
+    console.print(f"Wallet: {settings.wallet_address}")
+
+    try:
+        from web3 import Web3
+
+        # Polymarket contracts on Polygon
+        CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"  # Conditional Tokens
+        NEG_RISK_CTF_EXCHANGE = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+        CTF_EXCHANGE = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+        NEG_RISK_ADAPTER = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+
+        # ERC1155 setApprovalForAll ABI
+        APPROVAL_ABI = [
+            {
+                "inputs": [
+                    {"name": "operator", "type": "address"},
+                    {"name": "approved", "type": "bool"}
+                ],
+                "name": "setApprovalForAll",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"name": "account", "type": "address"},
+                    {"name": "operator", "type": "address"}
+                ],
+                "name": "isApprovedForAll",
+                "outputs": [{"name": "", "type": "bool"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ]
+
+        w3 = Web3(Web3.HTTPProvider(settings.polygon_rpc_url))
+        wallet = Web3.to_checksum_address(settings.wallet_address)
+        private_key = settings.private_key.get_secret_value()
+
+        ctf = w3.eth.contract(address=Web3.to_checksum_address(CTF_ADDRESS), abi=APPROVAL_ABI)
+
+        operators = [
+            ("NegRiskCTFExchange", NEG_RISK_CTF_EXCHANGE),
+            ("CTFExchange", CTF_EXCHANGE),
+            ("NegRiskAdapter", NEG_RISK_ADAPTER),
+        ]
+
+        for name, operator_addr in operators:
+            operator = Web3.to_checksum_address(operator_addr)
+
+            # Check if already approved
+            is_approved = ctf.functions.isApprovedForAll(wallet, operator).call()
+
+            if is_approved:
+                console.print(f"[green]✓[/green] {name}: Already approved")
+                continue
+
+            console.print(f"[yellow]→[/yellow] {name}: Setting approval...")
+
+            # Build and send transaction
+            nonce = w3.eth.get_transaction_count(wallet)
+            gas_price = w3.eth.gas_price
+
+            tx = ctf.functions.setApprovalForAll(operator, True).build_transaction({
+                'from': wallet,
+                'nonce': nonce,
+                'gas': 100000,
+                'gasPrice': int(gas_price * 1.1),  # 10% buffer
+                'chainId': 137,
+            })
+
+            signed = w3.eth.account.sign_transaction(tx, private_key)
+            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+
+            console.print(f"  TX: {tx_hash.hex()}")
+
+            # Wait for confirmation
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+
+            if receipt['status'] == 1:
+                console.print(f"[green]✓[/green] {name}: Approved successfully")
+            else:
+                console.print(f"[red]✗[/red] {name}: Transaction failed")
+
+        console.print("\n[bold green]Redemption approvals complete![/bold green]")
+        console.print("You can now redeem resolved positions.\n")
+
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]\n")
+
+
+@cli.command()
 @click.option("--limit", default=20, help="Number of trades to show")
 @click.option("--platform", type=click.Choice(["polymarket", "kalshi"]), help="Filter by platform")
 def trades(limit: int, platform: Optional[str]) -> None:
