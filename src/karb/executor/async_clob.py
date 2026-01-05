@@ -142,7 +142,7 @@ class AsyncClobClient:
 
         self._last_request_time: float = 0  # Track last request for keep-alive
         self._keepalive_task: Optional[asyncio.Task] = None
-        self._keepalive_interval: float = 10.0  # Refresh every 10s (proxy timeout ~30-45s)
+        self._keepalive_interval: float = 5.0  # Refresh every 5s to keep connections truly warm
         log.info("AsyncClobClient initialized", address=self.address)
 
     async def warmup(self, num_connections: int = 2, force: bool = False):
