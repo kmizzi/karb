@@ -190,7 +190,7 @@ class AsyncClobClient:
             await self.warmup(num_connections=2, force=True)
 
     async def _keepalive_loop(self):
-        """Background task that keeps connections warm."""
+        """Background task that keeps connections warm with lightweight pings."""
         log.info("Connection keep-alive task started", interval_s=self._keepalive_interval)
         while True:
             try:
@@ -198,13 +198,21 @@ class AsyncClobClient:
                 # Only refresh if we haven't made a request recently
                 idle_time = time.time() - self._last_request_time
                 if idle_time >= self._keepalive_interval * 0.8:  # 80% of interval
-                    await self.warmup(num_connections=2, force=True)
+                    # Lightweight parallel pings to keep both connections warm
+                    t0 = time.time()
+                    await asyncio.gather(
+                        self._client.get(f"{self.host}/tick-sizes"),
+                        self._client.get(f"{self.host}/tick-sizes"),
+                    )
+                    elapsed = int((time.time() - t0) * 1000)
+                    self._last_request_time = time.time()
+                    log.info("Connection keep-alive ping", elapsed_ms=elapsed)
             except asyncio.CancelledError:
                 log.info("Connection keep-alive task stopped")
                 break
             except Exception as e:
-                log.warning("Keep-alive refresh failed", error=str(e))
-                await asyncio.sleep(5)  # Brief pause before retry
+                log.warning("Keep-alive ping failed", error=str(e))
+                await asyncio.sleep(2)  # Brief pause before retry
 
     def start_keepalive(self):
         """Start the background keep-alive task."""
