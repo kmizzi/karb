@@ -141,6 +141,8 @@ class AsyncClobClient:
         self._neg_risk: dict[str, bool] = {}
 
         self._last_request_time: float = 0  # Track last request for keep-alive
+        self._keepalive_task: Optional[asyncio.Task] = None
+        self._keepalive_interval: float = 20.0  # Refresh connections every 20 seconds
         log.info("AsyncClobClient initialized", address=self.address)
 
     async def warmup(self, num_connections: int = 2, force: bool = False):
@@ -187,8 +189,36 @@ class AsyncClobClient:
             log.info("Connections may be cold, refreshing", idle_seconds=int(idle_time))
             await self.warmup(num_connections=2, force=True)
 
+    async def _keepalive_loop(self):
+        """Background task that keeps connections warm."""
+        log.info("Connection keep-alive task started", interval_s=self._keepalive_interval)
+        while True:
+            try:
+                await asyncio.sleep(self._keepalive_interval)
+                # Only refresh if we haven't made a request recently
+                idle_time = time.time() - self._last_request_time
+                if idle_time >= self._keepalive_interval * 0.8:  # 80% of interval
+                    await self.warmup(num_connections=2, force=True)
+            except asyncio.CancelledError:
+                log.info("Connection keep-alive task stopped")
+                break
+            except Exception as e:
+                log.warning("Keep-alive refresh failed", error=str(e))
+                await asyncio.sleep(5)  # Brief pause before retry
+
+    def start_keepalive(self):
+        """Start the background keep-alive task."""
+        if self._keepalive_task is None or self._keepalive_task.done():
+            self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+
+    def stop_keepalive(self):
+        """Stop the background keep-alive task."""
+        if self._keepalive_task and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
+
     async def close(self):
-        """Close the HTTP client."""
+        """Close the HTTP client and stop background tasks."""
+        self.stop_keepalive()
         await self._client.aclose()
 
     async def get_neg_risk(self, token_id: str) -> bool:
