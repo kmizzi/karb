@@ -354,15 +354,23 @@ class RealtimeArbitrageBot:
         max_position = Decimal(str(settings.max_position_size))
         available_size = min(alert.yes_size_available, alert.no_size_available)
 
+        # Calculate minimum shares needed so BOTH orders meet Polymarket's $1 minimum
+        # Formula: shares = $1.10 / price (using $1.10 for safety margin)
+        min_order_value = Decimal("1.10")  # Polymarket minimum is $1, add buffer
+        min_shares_for_yes = (min_order_value / alert.yes_ask).quantize(Decimal("1"), rounding="ROUND_UP")
+        min_shares_for_no = (min_order_value / alert.no_ask).quantize(Decimal("1"), rounding="ROUND_UP")
+        min_required_size = max(min_shares_for_yes, min_shares_for_no, Decimal("5"))  # At least 5 shares
+
         # Skip if insufficient liquidity on either side
-        min_required_size = Decimal("10")  # Minimum $10 trade
         if available_size < min_required_size:
             log.warning(
-                "Skipping arbitrage - insufficient liquidity",
+                "Skipping arbitrage - insufficient liquidity for $1 min orders",
                 market=alert.market.question[:40],
                 yes_available=float(alert.yes_size_available),
                 no_available=float(alert.no_size_available),
                 min_required=float(min_required_size),
+                yes_price=float(alert.yes_ask),
+                no_price=float(alert.no_ask),
             )
             # Save near-miss alert for visibility (non-blocking)
             asyncio.create_task(self._save_near_miss_alert(alert, min_required_size))
