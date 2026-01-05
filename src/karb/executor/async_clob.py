@@ -310,7 +310,9 @@ class AsyncClobClient:
             maker_amount_raw = round(size * 1e6)
             maker_amount = (maker_amount_raw // 100) * 100  # Ensure 4 decimal precision
             taker_amount_raw = round(size * price * 1e6)
-            taker_amount = (taker_amount_raw // 10000) * 10000  # Ensure 2 decimal precision
+            # USDC taker amount needs 3 decimal precision for SELL orders
+            # Polymarket expects exact: size * price with 3 decimals
+            taker_amount = (taker_amount_raw // 1000) * 1000  # Ensure 3 decimal precision
 
         # Generate unique salt (matching py_clob_client's approach)
         import random

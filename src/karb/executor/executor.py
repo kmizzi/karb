@@ -494,8 +494,10 @@ class OrderExecutor:
 
         # Sell at a discount to ensure fill (accept 2-3% loss to exit immediately)
         # This is better than holding an unhedged directional position
-        # Round DOWN to tick size (0.001) to ensure valid price
-        unwind_price = round(buy_price * 0.97, 3)  # Sell 3% below what we paid
+        # Round DOWN to tick size (0.01) to ensure valid price
+        # Most Polymarket markets use 0.01 tick size, some use 0.001
+        raw_unwind = buy_price * 0.97
+        unwind_price = float(int(raw_unwind * 100) / 100)  # Floor to 0.01 tick size
 
         log.warning(
             "Attempting emergency unwind",
