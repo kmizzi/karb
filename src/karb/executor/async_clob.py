@@ -140,16 +140,21 @@ class AsyncClobClient:
         self._tick_sizes: dict[str, str] = {}
         self._neg_risk: dict[str, bool] = {}
 
+        self._last_request_time: float = 0  # Track last request for keep-alive
         log.info("AsyncClobClient initialized", address=self.address)
 
-    async def warmup(self, num_connections: int = 2):
+    async def warmup(self, num_connections: int = 2, force: bool = False):
         """
         Warm up the connection pool by making parallel requests.
 
         We need multiple connections warm for parallel order submission.
         Each parallel request needs its own connection to avoid head-of-line blocking.
+
+        Args:
+            num_connections: Number of parallel connections to establish
+            force: If True, warmup even if already done (for keep-alive refresh)
         """
-        if self._warmed_up:
+        if self._warmed_up and not force:
             return
         try:
             t0 = time.time()
@@ -161,10 +166,26 @@ class AsyncClobClient:
             ]
             await asyncio.gather(*warmup_tasks)
             elapsed = int((time.time() - t0) * 1000)
-            log.info("Connection warmup complete", elapsed_ms=elapsed, connections=num_connections)
+            self._last_request_time = time.time()
+            if not self._warmed_up:
+                log.info("Connection warmup complete", elapsed_ms=elapsed, connections=num_connections)
+            else:
+                log.debug("Connection keep-alive refresh", elapsed_ms=elapsed)
             self._warmed_up = True
         except Exception as e:
             log.warning("Connection warmup failed", error=str(e))
+
+    async def ensure_warm_connections(self, max_idle_seconds: float = 30.0):
+        """
+        Ensure connections are warm before making requests.
+
+        HTTP keep-alive connections expire after inactivity. This method
+        refreshes connections if they've been idle too long.
+        """
+        idle_time = time.time() - self._last_request_time
+        if idle_time > max_idle_seconds:
+            log.info("Connections may be cold, refreshing", idle_seconds=int(idle_time))
+            await self.warmup(num_connections=2, force=True)
 
     async def close(self):
         """Close the HTTP client."""
@@ -392,6 +413,7 @@ class AsyncClobClient:
             content=body_str,
         )
         t2 = time.time()
+        self._last_request_time = t2  # Track for keep-alive
 
         # Log detailed timing for debugging slow requests
         prep_ms = int((t1 - t0) * 1000)
@@ -482,6 +504,10 @@ class AsyncClobClient:
         Returns:
             Tuple of (list of API responses, timing dict with ms values)
         """
+        # Ensure connections are warm before submitting orders
+        # HTTP keep-alive expires after inactivity, causing 1-2s delays
+        await self.ensure_warm_connections(max_idle_seconds=30.0)
+
         t0 = time.time()
 
         # Auto-detect neg_risk for orders where it's None, in parallel
