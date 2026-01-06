@@ -459,24 +459,23 @@ class RealtimeArbitrageBot:
                         profit=f"${float(result.expected_profit):.2f}",
                     )
                 else:
-                    # Trade failed/partial - restore deducted balance
-                    # (actual balance will be corrected on next refresh)
-                    async with self._balance_lock:
-                        self._cached_balance += required_cost
-                    log.debug(
-                        "Restored balance after failed trade",
-                        restored=float(required_cost),
+                    # Trade failed/partial - refresh actual balance from chain
+                    # Don't blindly restore as that causes cache inflation
+                    new_balance = await self._refresh_balance()
+                    log.warning(
+                        "Refreshed balance after failed trade",
+                        new_balance=float(new_balance),
                         status=result.status.value,
                     )
 
             except Exception as e:
-                # Restore balance on exception
-                async with self._balance_lock:
-                    self._cached_balance += required_cost
+                # Exception - refresh actual balance from chain
+                new_balance = await self._refresh_balance()
                 log.error(
-                    "Execution error",
+                    "Execution error - refreshed balance",
                     market=alert.market.question[:30],
                     error=str(e),
+                    new_balance=float(new_balance),
                 )
 
     async def _auto_redemption_loop(self) -> None:

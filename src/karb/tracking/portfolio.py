@@ -29,7 +29,7 @@ class PortfolioTracker:
         pass  # No file path needed, uses database
 
     async def get_current_balances(self) -> dict[str, Any]:
-        """Fetch current balances from Polymarket."""
+        """Fetch current balances from Polymarket API."""
         settings = get_settings()
         balances: dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
@@ -37,32 +37,61 @@ class PortfolioTracker:
             "total_usd": 0.0,
         }
 
-        # Get Polymarket USDC balance (on-chain on Polygon)
-        if settings.wallet_address:
-            try:
-                from web3 import Web3
+        # Get Polymarket collateral balance via API (most accurate for trading)
+        try:
+            from py_clob_client.client import ClobClient
+            from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
 
-                # Both USDC contracts on Polygon
-                USDC_BRIDGED = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"  # Bridged USDC
-                USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"   # Native USDC
-                USDC_ABI = [{"constant":True,"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"}]
+            client = ClobClient(
+                host="https://clob.polymarket.com",
+                key=settings.private_key.get_secret_value(),
+                chain_id=137,
+            )
+            creds = client.create_or_derive_api_creds()
+            client.set_api_creds(creds)
 
-                w3 = Web3(Web3.HTTPProvider(settings.polygon_rpc_url))
-                wallet = Web3.to_checksum_address(settings.wallet_address)
+            params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+            result = client.get_balance_allowance(params)
 
-                # Check both USDC contracts
-                total_usdc = 0.0
-                for addr in [USDC_BRIDGED, USDC_NATIVE]:
-                    usdc = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=USDC_ABI)
-                    balance = usdc.functions.balanceOf(wallet).call()
-                    total_usdc += balance / 1e6  # USDC has 6 decimals
+            # Balance is in smallest unit (6 decimals for USDC)
+            balance_raw = int(result.get("balance", "0"))
+            balances["polymarket_usdc"] = balance_raw / 1e6
 
-                balances["polymarket_usdc"] = total_usdc
-            except Exception as e:
-                log.error("Failed to get balances", error=str(e))
+            log.debug("Fetched Polymarket balance", balance=balances["polymarket_usdc"])
+        except Exception as e:
+            log.error("Failed to get Polymarket balance via API", error=str(e))
+            # Fallback to on-chain query
+            balances["polymarket_usdc"] = await self._get_onchain_usdc_balance()
 
         balances["total_usd"] = balances["polymarket_usdc"]
         return balances
+
+    async def _get_onchain_usdc_balance(self) -> float:
+        """Fallback: get USDC balance from on-chain."""
+        settings = get_settings()
+        if not settings.wallet_address:
+            return 0.0
+
+        try:
+            from web3 import Web3
+
+            USDC_BRIDGED = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+            USDC_ABI = [{"constant":True,"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"}]
+
+            w3 = Web3(Web3.HTTPProvider(settings.polygon_rpc_url))
+            wallet = Web3.to_checksum_address(settings.wallet_address)
+
+            total_usdc = 0.0
+            for addr in [USDC_BRIDGED, USDC_NATIVE]:
+                usdc = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=USDC_ABI)
+                balance = usdc.functions.balanceOf(wallet).call()
+                total_usdc += balance / 1e6
+
+            return total_usdc
+        except Exception as e:
+            log.error("Failed to get on-chain USDC balance", error=str(e))
+            return 0.0
 
     async def get_positions(self) -> dict[str, Any]:
         """Get open positions on Polymarket."""
