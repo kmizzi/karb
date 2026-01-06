@@ -131,7 +131,7 @@ class AsyncClobClient:
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, connect=10.0),  # Increased timeout for slow proxy
             transport=transport,
-            http2=True,  # Use HTTP/2 for better performance
+            http2=False,  # HTTP/1.1 works better through SOCKS5 proxy
             limits=limits,
         )
         self._warmed_up = False

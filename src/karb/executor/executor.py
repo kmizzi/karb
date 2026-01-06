@@ -257,9 +257,11 @@ class OrderExecutor:
         """Lazily initialize the async CLOB client and warm up connection."""
         if self._async_client is None:
             self._async_client = await create_async_clob_client()
-            # Initial warmup (keep-alive disabled - we warmup before each execution)
             if self._async_client:
+                # Initial warmup
                 await self._async_client.warmup()
+                # Start background keep-alive to prevent connections going cold
+                self._async_client.start_keepalive()
         return self._async_client
 
     async def close(self) -> None:
