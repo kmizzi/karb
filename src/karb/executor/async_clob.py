@@ -542,10 +542,6 @@ class AsyncClobClient:
         Returns:
             Tuple of (list of API responses, timing dict with ms values)
         """
-        # Ensure connections are warm before submitting orders
-        # HTTP keep-alive expires after inactivity, causing 1-2s delays
-        await self.ensure_warm_connections(max_idle_seconds=30.0)
-
         t0 = time.time()
 
         # Auto-detect neg_risk for orders where it's None, in parallel
