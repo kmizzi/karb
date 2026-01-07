@@ -478,6 +478,10 @@ class OrderExecutor:
         Uses aggressive pricing (sell slightly below best bid) to ensure fill.
         This accepts a small loss to exit an unhedged position immediately.
 
+        IMPORTANT: Wait for on-chain settlement before trying to sell.
+        The buy order is "matched" but tokens aren't available until the
+        settlement transaction is confirmed on Polygon (~2-3 seconds).
+
         Args:
             token_id: Token to sell
             side: Should be "SELL"
@@ -493,6 +497,16 @@ class OrderExecutor:
         if not async_client:
             log.error("Cannot unwind - no async client available")
             return False
+
+        # Wait for on-chain settlement before trying to sell
+        # Polygon block time is ~2 seconds, wait for 2 confirmations
+        settlement_wait = 5.0  # seconds
+        log.info(
+            "Waiting for settlement before unwind",
+            wait_seconds=settlement_wait,
+            token_id=token_id[:16],
+        )
+        await asyncio.sleep(settlement_wait)
 
         # Sell at a discount to ensure fill (accept 2-3% loss to exit immediately)
         # This is better than holding an unhedged directional position
