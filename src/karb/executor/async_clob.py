@@ -136,9 +136,10 @@ class AsyncClobClient:
         )
         self._warmed_up = False
 
-        # Cache for tick sizes and neg_risk status
+        # Cache for tick sizes, neg_risk status, and fee rates
         self._tick_sizes: dict[str, str] = {}
         self._neg_risk: dict[str, bool] = {}
+        self._fee_rates: dict[str, int] = {}
 
         self._last_request_time: float = 0  # Track last request for keep-alive
         self._keepalive_task: Optional[asyncio.Task] = None
@@ -305,6 +306,39 @@ class AsyncClobClient:
         )
 
         return self._neg_risk.copy()
+
+    async def get_fee_rate_bps(self, token_id: str) -> int:
+        """
+        Get the fee rate in basis points for a token.
+
+        Args:
+            token_id: The token ID to get fee rate for
+
+        Returns:
+            Fee rate in basis points (e.g., 1000 = 0.1%)
+        """
+        # Return cached value if available
+        if token_id in self._fee_rates:
+            return self._fee_rates[token_id]
+
+        try:
+            resp = await self._client.get(
+                f"{self.host}/fee-rate",
+                params={"token_id": token_id},
+            )
+            self._last_request_time = time.time()
+
+            if resp.status_code == 200:
+                data = resp.json()
+                fee_rate = data.get("base_fee", 0)
+                self._fee_rates[token_id] = fee_rate
+                return fee_rate
+        except Exception as e:
+            log.warning("Failed to get fee rate", token_id=token_id[:20], error=str(e))
+
+        # Default to 0 if API call fails (API may reject, but better than crashing)
+        self._fee_rates[token_id] = 0
+        return 0
 
     def _build_hmac_signature(
         self,
@@ -495,9 +529,18 @@ class AsyncClobClient:
         """
         t0 = time.time()
 
-        # Auto-detect neg_risk if not provided
+        # Fetch neg_risk and fee_rate in parallel if needed
+        fetch_tasks = []
         if neg_risk is None:
-            neg_risk = await self.get_neg_risk(token_id)
+            fetch_tasks.append(self.get_neg_risk(token_id))
+        fetch_tasks.append(self.get_fee_rate_bps(token_id))
+
+        await asyncio.gather(*fetch_tasks)
+
+        # Get resolved values from cache
+        if neg_risk is None:
+            neg_risk = self._neg_risk.get(token_id, False)
+        fee_rate = self._fee_rates.get(token_id, 0)
         t1 = time.time()
 
         # Run signing in thread pool to not block event loop
@@ -510,6 +553,7 @@ class AsyncClobClient:
             price,
             size,
             neg_risk,
+            fee_rate,
         )
         t2 = time.time()
 
@@ -518,7 +562,7 @@ class AsyncClobClient:
 
         log.debug(
             "Order timing breakdown",
-            neg_risk_ms=int((t1 - t0) * 1000),
+            prefetch_ms=int((t1 - t0) * 1000),
             sign_ms=int((t2 - t1) * 1000),
             submit_ms=int((t3 - t2) * 1000),
             total_ms=int((t3 - t0) * 1000),
@@ -544,26 +588,36 @@ class AsyncClobClient:
         """
         t0 = time.time()
 
+        # Get unique token IDs
+        all_token_ids = list(set(token_id for token_id, side, price, size, neg_risk in orders))
+
         # Auto-detect neg_risk for orders where it's None, in parallel
-        tokens_needing_check = [
+        tokens_needing_neg_risk = [
             token_id for token_id, side, price, size, neg_risk in orders if neg_risk is None
         ]
 
-        # Fetch all neg_risk values in parallel (only for tokens that need checking)
-        if tokens_needing_check:
-            neg_risk_results = await asyncio.gather(
-                *[self.get_neg_risk(token_id) for token_id in tokens_needing_check]
-            )
-            neg_risk_map = dict(zip(tokens_needing_check, neg_risk_results))
-        else:
-            neg_risk_map = {}
+        # Fetch neg_risk and fee_rate in parallel for all tokens
+        # These are cached, so subsequent calls will be instant
+        fetch_tasks = []
 
-        # Build resolved orders with neg_risk values
+        # Add neg_risk fetch tasks
+        if tokens_needing_neg_risk:
+            fetch_tasks.extend([self.get_neg_risk(token_id) for token_id in tokens_needing_neg_risk])
+
+        # Add fee_rate fetch tasks for all tokens
+        fetch_tasks.extend([self.get_fee_rate_bps(token_id) for token_id in all_token_ids])
+
+        # Run all fetches in parallel
+        if fetch_tasks:
+            await asyncio.gather(*fetch_tasks)
+
+        # Build resolved orders with neg_risk and fee_rate values
         resolved_orders = []
         for token_id, side, price, size, neg_risk in orders:
             if neg_risk is None:
-                neg_risk = neg_risk_map.get(token_id, False)
-            resolved_orders.append((token_id, side, price, size, neg_risk))
+                neg_risk = self._neg_risk.get(token_id, False)
+            fee_rate = self._fee_rates.get(token_id, 0)
+            resolved_orders.append((token_id, side, price, size, neg_risk, fee_rate))
         t1 = time.time()
 
         # Sign all orders in parallel using thread pool
@@ -577,8 +631,9 @@ class AsyncClobClient:
                 price,
                 size,
                 neg_risk,
+                fee_rate,
             )
-            for token_id, side, price, size, neg_risk in resolved_orders
+            for token_id, side, price, size, neg_risk, fee_rate in resolved_orders
         ]
         signed_orders = await asyncio.gather(*sign_tasks)
         t2 = time.time()
@@ -616,7 +671,7 @@ class AsyncClobClient:
                 order_timings.append(0)
 
         timing = {
-            "neg_risk_ms": int((t1 - t0) * 1000),
+            "prefetch_ms": int((t1 - t0) * 1000),  # neg_risk + fee_rate fetch
             "sign_ms": int((t2 - t1) * 1000),
             "submit_ms": int((t3 - t2) * 1000),
             "total_ms": int((t3 - t0) * 1000),
@@ -625,7 +680,7 @@ class AsyncClobClient:
 
         log.info(
             "Parallel order timing",
-            neg_risk_ms=timing["neg_risk_ms"],
+            prefetch_ms=timing["prefetch_ms"],
             sign_ms=timing["sign_ms"],
             submit_ms=timing["submit_ms"],
             total_ms=timing["total_ms"],
