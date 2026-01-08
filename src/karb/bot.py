@@ -614,7 +614,7 @@ class RealtimeArbitrageBot:
 
     async def _refresh_balance(self) -> Decimal:
         """Fetch current USDC balance from chain and update cache."""
-        from karb.tracking.portfolio import PortfolioTracker
+        from karb.tracking.portfolio import PortfolioTracker, BalanceSnapshot
 
         try:
             tracker = PortfolioTracker()
@@ -623,6 +623,26 @@ class RealtimeArbitrageBot:
 
             async with self._balance_lock:
                 self._cached_balance = balance
+
+            # Record snapshot for daily balance chart
+            # Fetch positions value for total portfolio tracking
+            positions_value = 0.0
+            try:
+                positions = await self.clob_client.get_positions()
+                for p in positions:
+                    size = float(p.get("size", 0) or 0)
+                    cur_price = float(p.get("curPrice", 0) or 0)
+                    positions_value += size * cur_price
+            except Exception as e:
+                log.debug("Failed to fetch positions for snapshot", error=str(e))
+
+            snapshot = BalanceSnapshot(
+                timestamp=balances.get("timestamp", ""),
+                polymarket_usdc=float(balance),
+                total_usd=float(balance) + positions_value,
+                positions_value=positions_value,
+            )
+            await tracker.record_snapshot_async(snapshot)
 
             log.debug("Balance refreshed", balance=f"${float(balance):.2f}")
             return balance

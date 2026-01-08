@@ -752,7 +752,7 @@
         <!-- Orders Section -->
         <div class="card" style="margin-bottom: 24px;">
             <div class="card-header">
-                <span class="card-title">Order Status</span>
+                <span class="card-title">Order Log</span>
                 <span class="refresh-indicator">Live</span>
             </div>
             <div id="orders-container">
@@ -1511,7 +1511,7 @@
                 // Recent executions (sorted by time descending - most recent first)
                 if (recentExecs.length > 0) {
                     html += `<h4 style="margin: 16px 0 8px; color: var(--text-secondary);">Recent Executions</h4>`;
-                    html += `<div id="executions-table-container" class="table-container" style="max-height: 400px; overflow-y: auto;"><table>
+                    html += `<div id="executions-table-container" class="table-container" style="max-height: 600px; overflow-y: auto;"><table>
                         <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 1;">
                             <tr>
                                 <th>Time</th>
