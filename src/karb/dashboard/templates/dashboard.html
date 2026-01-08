@@ -1511,7 +1511,7 @@
                 // Recent executions (sorted by time descending - most recent first)
                 if (recentExecs.length > 0) {
                     html += `<h4 style="margin: 16px 0 8px; color: var(--text-secondary);">Recent Executions</h4>`;
-                    html += `<div class="table-container" style="max-height: 400px; overflow-y: auto;"><table>
+                    html += `<div id="executions-table-container" class="table-container" style="max-height: 400px; overflow-y: auto;"><table>
                         <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 1;">
                             <tr>
                                 <th>Time</th>
@@ -1643,37 +1643,28 @@
                 }
 
                 // Preserve scroll position of the executions table before updating
-                // Get all table-containers and find the one with overflow-y: auto (the executions table)
-                const execTables = container.querySelectorAll('.table-container');
-                let scrollTop = 0;
-                execTables.forEach(t => {
-                    if (t.style.maxHeight || t.scrollTop > 0) {
-                        scrollTop = t.scrollTop;
-                    }
-                });
+                const oldExecTable = document.getElementById('executions-table-container');
+                let scrollTop = oldExecTable ? oldExecTable.scrollTop : 0;
 
                 container.innerHTML = html;
 
-                // Restore scroll position after updating - target the scrollable table
-                const newExecTables = container.querySelectorAll('.table-container');
-                newExecTables.forEach(t => {
-                    if (t.style.maxHeight && scrollTop > 0) {
-                        t.scrollTop = scrollTop;
+                // Restore scroll position and add scroll listener for infinite scroll
+                const execTableContainer = document.getElementById('executions-table-container');
+                if (execTableContainer) {
+                    // Restore scroll position
+                    if (scrollTop > 0) {
+                        execTableContainer.scrollTop = scrollTop;
                     }
-                });
 
-                // Add scroll listener for infinite scroll on the executions table
-                newExecTables.forEach(t => {
-                    if (t.style.maxHeight) {
-                        t.onscroll = function() {
-                            // Load more when scrolled near bottom
-                            if (executionsHasMore && !executionsLoading &&
-                                t.scrollTop + t.clientHeight >= t.scrollHeight - 100) {
-                                fetchOrders(true);
-                            }
-                        };
-                    }
-                });
+                    // Add scroll listener for infinite scroll
+                    execTableContainer.onscroll = function() {
+                        // Load more when scrolled near bottom (within 100px)
+                        const nearBottom = execTableContainer.scrollTop + execTableContainer.clientHeight >= execTableContainer.scrollHeight - 100;
+                        if (executionsHasMore && !executionsLoading && nearBottom) {
+                            fetchOrders(true);
+                        }
+                    };
+                }
 
                 // Log active orders
                 if (activeOrders.length > 0) {
