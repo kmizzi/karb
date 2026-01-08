@@ -680,7 +680,7 @@
         <!-- Daily Balance Chart -->
         <div class="card" style="margin-bottom: 24px;">
             <div class="card-header">
-                <span class="card-title">💰 Daily Balance (Last 30d, PST)</span>
+                <span class="card-title">💰 Portfolio Value (Last 30d) <span style="font-size: 11px; color: var(--text-secondary);">*historical values estimated</span></span>
                 <span class="refresh-indicator">Live</span>
             </div>
             <div class="chart-container">
@@ -2317,7 +2317,7 @@
                     labels: labels,
                     datasets: [
                         {
-                            label: 'Total',
+                            label: 'Total (Est.)',
                             data: data.total,
                             borderColor: '#58a6ff',
                             backgroundColor: 'rgba(88, 166, 255, 0.1)',
@@ -2327,7 +2327,7 @@
                             order: 1,
                         },
                         {
-                            label: 'USDC',
+                            label: 'USDC (On-chain)',
                             data: data.usdc,
                             borderColor: '#3fb950',
                             backgroundColor: 'transparent',
@@ -2337,7 +2337,7 @@
                             order: 2,
                         },
                         {
-                            label: 'Positions',
+                            label: 'Positions (Est.)',
                             data: data.positions_value,
                             borderColor: '#a371f7',
                             backgroundColor: 'transparent',
