@@ -301,8 +301,6 @@ class AlertRepository:
 class ExecutionRepository:
     """Repository for order executions."""
 
-    MAX_EXECUTIONS = 50  # Keep last 50 executions
-
     @staticmethod
     async def insert(
         timestamp: str,
@@ -349,16 +347,6 @@ class ExecutionRepository:
                 ),
             )
             exec_id = cursor.lastrowid or 0
-
-            # Cleanup old executions
-            await conn.execute(
-                """
-                DELETE FROM executions WHERE id NOT IN (
-                    SELECT id FROM executions ORDER BY id DESC LIMIT ?
-                )
-                """,
-                (ExecutionRepository.MAX_EXECUTIONS,),
-            )
 
             # Update execution stats
             await conn.execute(
