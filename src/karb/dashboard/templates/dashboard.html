@@ -1565,7 +1565,25 @@
                     html = '<div class="empty-state">No orders yet</div>';
                 }
 
+                // Preserve scroll position of the executions table before updating
+                // Get all table-containers and find the one with overflow-y: auto (the executions table)
+                const execTables = container.querySelectorAll('.table-container');
+                let scrollTop = 0;
+                execTables.forEach(t => {
+                    if (t.style.maxHeight || t.scrollTop > 0) {
+                        scrollTop = t.scrollTop;
+                    }
+                });
+
                 container.innerHTML = html;
+
+                // Restore scroll position after updating - target the scrollable table
+                const newExecTables = container.querySelectorAll('.table-container');
+                newExecTables.forEach(t => {
+                    if (t.style.maxHeight && scrollTop > 0) {
+                        t.scrollTop = scrollTop;
+                    }
+                });
 
                 // Log active orders
                 if (activeOrders.length > 0) {
