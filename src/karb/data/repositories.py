@@ -379,12 +379,12 @@ class ExecutionRepository:
             return exec_id
 
     @staticmethod
-    async def get_recent(limit: int = 20) -> list[dict[str, Any]]:
-        """Get recent executions."""
+    async def get_recent(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        """Get recent executions with pagination."""
         async with get_async_db() as conn:
             cursor = await conn.execute(
-                "SELECT * FROM executions ORDER BY id DESC LIMIT ?",
-                (limit,),
+                "SELECT * FROM executions ORDER BY id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]

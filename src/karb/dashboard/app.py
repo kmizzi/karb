@@ -413,9 +413,13 @@ def create_app() -> FastAPI:
             return {"error": str(e), "redeemed": 0}
 
     @app.get("/api/orders")
-    async def get_orders(username: str = Depends(verify_credentials)):
+    async def get_orders(
+        limit: int = 50,
+        offset: int = 0,
+        username: str = Depends(verify_credentials),
+    ):
         """Get current order status and recent executions from database."""
-        executions = await ExecutionRepository.get_recent(limit=20)
+        executions = await ExecutionRepository.get_recent(limit=limit, offset=offset)
         stats = await ExecutionRepository.get_stats()
 
         # Format executions for dashboard compatibility

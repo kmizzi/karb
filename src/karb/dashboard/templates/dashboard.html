@@ -1373,15 +1373,83 @@
             }
         }
 
-        async function fetchOrders() {
+        // Orders/executions state for lazy loading
+        let executionsOffset = 0;
+        let allExecutions = [];
+        let executionsHasMore = true;
+        let executionsLoading = false;
+        let lastStats = {};
+        let userLoadedMore = false;  // Track if user has loaded more data
+
+        async function fetchOrders(loadMore = false) {
+            if (executionsLoading) return;
+            executionsLoading = true;
+
             try {
-                const resp = await fetch('/api/orders');
+                // If user has loaded more data and this is an auto-refresh, skip resetting
+                // This preserves their scroll position and loaded data
+                if (!loadMore && userLoadedMore) {
+                    // Just update stats, don't reset data
+                    const resp = await fetch('/api/orders?limit=1&offset=0');
+                    const data = await resp.json();
+                    lastStats = data.stats || {};
+                    // Update stats display without resetting table
+                    const statsContainer = document.querySelector('#orders-container > div:first-child');
+                    if (statsContainer) {
+                        statsContainer.innerHTML = `
+                            <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                                <span style="color: var(--text-secondary);">Total:</span>
+                                <span style="font-weight: 600;">${lastStats.total_attempts || 0}</span>
+                            </div>
+                            <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                                <span style="color: var(--text-secondary);">Filled:</span>
+                                <span style="font-weight: 600; color: var(--accent-green);">${lastStats.successful || 0}</span>
+                            </div>
+                            <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                                <span style="color: var(--text-secondary);">Partial:</span>
+                                <span style="font-weight: 600; color: var(--accent-yellow);">${lastStats.partial || 0}</span>
+                            </div>
+                            <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                                <span style="color: var(--text-secondary);">Cancelled:</span>
+                                <span style="font-weight: 600; color: var(--accent-blue);">${lastStats.cancelled || 0}</span>
+                            </div>
+                            <div style="padding: 8px 16px; background: var(--bg-tertiary); border-radius: 6px;">
+                                <span style="color: var(--text-secondary);">Failed:</span>
+                                <span style="font-weight: 600; color: var(--accent-red);">${lastStats.failed || 0}</span>
+                            </div>
+                        `;
+                    }
+                    executionsLoading = false;
+                    return;
+                }
+
+                if (!loadMore) {
+                    executionsOffset = 0;
+                    allExecutions = [];
+                    executionsHasMore = true;
+                } else {
+                    userLoadedMore = true;  // User explicitly loaded more
+                }
+
+                const resp = await fetch(`/api/orders?limit=50&offset=${executionsOffset}`);
                 const data = await resp.json();
 
                 const container = document.getElementById('orders-container');
                 const activeOrders = data.active_orders || [];
-                const recentExecs = data.recent_executions || [];
+                const newExecs = data.recent_executions || [];
                 const stats = data.stats || {};
+
+                // Append new executions
+                if (loadMore) {
+                    allExecutions = [...allExecutions, ...newExecs];
+                } else {
+                    allExecutions = newExecs;
+                }
+                executionsOffset += newExecs.length;
+                executionsHasMore = newExecs.length === 50;  // If we got a full page, there might be more
+                lastStats = stats;
+
+                const recentExecs = allExecutions;
 
                 let html = '';
 
@@ -1559,6 +1627,15 @@
                             `}).join('')}
                         </tbody>
                     </table></div>`;
+
+                    // Add Load More button if there might be more data
+                    if (executionsHasMore) {
+                        html += `<div id="executions-pagination" style="text-align: center; padding: 12px;">
+                            <button onclick="fetchOrders(true)" style="padding: 8px 24px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer;">
+                                Load More (${allExecutions.length} loaded)
+                            </button>
+                        </div>`;
+                    }
                 }
 
                 if (activeOrders.length === 0 && recentExecs.length === 0) {
@@ -1585,12 +1662,27 @@
                     }
                 });
 
+                // Add scroll listener for infinite scroll on the executions table
+                newExecTables.forEach(t => {
+                    if (t.style.maxHeight) {
+                        t.onscroll = function() {
+                            // Load more when scrolled near bottom
+                            if (executionsHasMore && !executionsLoading &&
+                                t.scrollTop + t.clientHeight >= t.scrollHeight - 100) {
+                                fetchOrders(true);
+                            }
+                        };
+                    }
+                });
+
                 // Log active orders
                 if (activeOrders.length > 0) {
                     addLogLine('info', `${activeOrders.length} order(s) pending fill...`);
                 }
             } catch (e) {
                 console.error('Orders fetch error:', e);
+            } finally {
+                executionsLoading = false;
             }
         }
 
