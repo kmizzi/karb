@@ -874,6 +874,119 @@ def positions() -> None:
 
 
 @cli.command()
+@click.option("--polygonscan-api-key", envvar="POLYGONSCAN_API_KEY", help="Polygonscan API key")
+@click.option("--dry-run", is_flag=True, help="Show what would be inserted without inserting")
+def backfill_balance(polygonscan_api_key: Optional[str], dry_run: bool) -> None:
+    """Backfill historical balance data from on-chain USDC transfers."""
+    import httpx
+    from datetime import datetime
+    from collections import defaultdict
+
+    settings = get_settings()
+
+    if not settings.wallet_address:
+        console.print("[red]Error:[/red] No wallet address configured")
+        return
+
+    if not polygonscan_api_key:
+        console.print("[red]Error:[/red] No Polygonscan API key provided")
+        console.print("[dim]Set POLYGONSCAN_API_KEY env var or use --polygonscan-api-key[/dim]")
+        return
+
+    async def _backfill():
+        wallet = settings.wallet_address.lower()
+        usdc_bridged = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+
+        console.print(f"\n[bold]Fetching USDC transfers from Polygonscan...[/bold]")
+        console.print(f"[dim]Wallet: {wallet}[/dim]\n")
+
+        # Fetch all USDC transfers
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://api.etherscan.io/v2/api",
+                params={
+                    "chainid": "137",
+                    "module": "account",
+                    "action": "tokentx",
+                    "contractaddress": usdc_bridged,
+                    "address": wallet,
+                    "page": "1",
+                    "offset": "1000",
+                    "sort": "asc",
+                    "apikey": polygonscan_api_key,
+                },
+            )
+            data = resp.json()
+
+        if data.get("status") != "1":
+            console.print(f"[red]API Error:[/red] {data.get('message', 'Unknown error')}")
+            return
+
+        txs = data.get("result", [])
+        console.print(f"Found [bold]{len(txs)}[/bold] USDC transfers\n")
+
+        # Calculate daily balance changes
+        daily_changes: dict[str, float] = defaultdict(float)
+        for tx in txs:
+            ts = int(tx["timeStamp"])
+            date = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+            amount = int(tx["value"]) / 1e6
+
+            if tx["to"].lower() == wallet:
+                daily_changes[date] += amount  # incoming
+            elif tx["from"].lower() == wallet:
+                daily_changes[date] -= amount  # outgoing
+
+        # Calculate cumulative balance for each day
+        from karb.data.repositories import PortfolioRepository
+
+        balance = 0.0
+        inserted = 0
+
+        table = Table(title="Daily Balance History")
+        table.add_column("Date")
+        table.add_column("Change", justify="right")
+        table.add_column("Balance", justify="right")
+        table.add_column("Status")
+
+        for date in sorted(daily_changes.keys()):
+            change = daily_changes[date]
+            balance += change
+
+            # Create end-of-day timestamp
+            timestamp = f"{date}T23:59:59"
+
+            if dry_run:
+                status = "[yellow]would insert[/yellow]"
+            else:
+                await PortfolioRepository.insert(
+                    timestamp=timestamp,
+                    polymarket_usdc=balance,
+                    total_usd=balance,  # USDC only, no positions data
+                    positions_value=0.0,
+                )
+                inserted += 1
+                status = "[green]inserted[/green]"
+
+            change_color = "green" if change >= 0 else "red"
+            table.add_row(
+                date,
+                f"[{change_color}]{change:+.2f}[/{change_color}]",
+                f"${balance:.2f}",
+                status,
+            )
+
+        console.print(table)
+
+        if dry_run:
+            console.print(f"\n[yellow]Dry run:[/yellow] Would insert {len(daily_changes)} snapshots")
+        else:
+            console.print(f"\n[green]Success:[/green] Inserted {inserted} daily balance snapshots")
+
+    asyncio.run(_backfill())
+
+
+@cli.command()
 @click.option("--host", default="0.0.0.0", help="Host to bind to")
 @click.option("--port", type=int, help="Port to run on (default: from config)")
 def dashboard(host: str, port: Optional[int]) -> None:
