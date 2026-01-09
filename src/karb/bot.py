@@ -384,65 +384,65 @@ class RealtimeArbitrageBot:
 
         trade_size = min(available_size, max_position)
 
-        # Check if we have sufficient balance for this trade
-        # Cost = trade_size * combined_cost (buying both YES and NO)
-        required_cost = trade_size * alert.combined_cost
-
-        async with self._balance_lock:
-            current_balance = self._cached_balance
-
-        if current_balance < required_cost:
-            # Try to reduce trade size to fit available balance
-            if current_balance >= min_required_size * alert.combined_cost:
-                # We have enough for at least minimum trade
-                max_affordable_size = current_balance / alert.combined_cost
-                trade_size = min(trade_size, max_affordable_size.quantize(Decimal("1"), rounding="ROUND_DOWN"))
-                required_cost = trade_size * alert.combined_cost
-                log.info(
-                    "Reduced trade size to fit balance",
-                    market=alert.market.question[:40],
-                    original_size=float(available_size),
-                    adjusted_size=float(trade_size),
-                    balance=float(current_balance),
-                )
-            else:
-                # Not enough balance for even minimum trade
-                log.warning(
-                    "Skipping arbitrage - insufficient balance",
-                    market=alert.market.question[:40],
-                    required=float(required_cost),
-                    available=float(current_balance),
-                )
-                # Save near-miss alert for visibility
-                asyncio.create_task(self._save_insufficient_balance_alert(alert, required_cost, current_balance))
-                return
-
-        opportunity = ArbitrageOpportunity(
-            market=alert.market,
-            yes_ask=alert.yes_ask,
-            no_ask=alert.no_ask,
-            combined_cost=alert.combined_cost,
-            profit_pct=alert.profit_pct,
-            yes_size_available=alert.yes_size_available,
-            no_size_available=alert.no_size_available,
-            max_trade_size=trade_size,
-        )
-
-        log.info(
-            "Executing with liquidity-adjusted size",
-            market=alert.market.question[:40],
-            trade_size=float(trade_size),
-            yes_liquidity=float(alert.yes_size_available),
-            no_liquidity=float(alert.no_size_available),
-            balance=float(current_balance),
-        )
-
-        # Deduct expected cost from cached balance immediately to prevent over-trading
-        async with self._balance_lock:
-            self._cached_balance -= required_cost
-
-        # Execute immediately (with lock to prevent concurrent executions)
+        # Use execution lock for the ENTIRE balance check + deduct + execute flow
+        # This prevents race conditions where multiple opportunities pass balance check simultaneously
         async with self._execution_lock:
+            # Check if we have sufficient balance for this trade
+            # Cost = trade_size * combined_cost (buying both YES and NO)
+            required_cost = trade_size * alert.combined_cost
+
+            async with self._balance_lock:
+                current_balance = self._cached_balance
+
+            if current_balance < required_cost:
+                # Try to reduce trade size to fit available balance
+                if current_balance >= min_required_size * alert.combined_cost:
+                    # We have enough for at least minimum trade
+                    max_affordable_size = current_balance / alert.combined_cost
+                    trade_size = min(trade_size, max_affordable_size.quantize(Decimal("1"), rounding="ROUND_DOWN"))
+                    required_cost = trade_size * alert.combined_cost
+                    log.info(
+                        "Reduced trade size to fit balance",
+                        market=alert.market.question[:40],
+                        original_size=float(available_size),
+                        adjusted_size=float(trade_size),
+                        balance=float(current_balance),
+                    )
+                else:
+                    # Not enough balance for even minimum trade
+                    log.warning(
+                        "Skipping arbitrage - insufficient balance",
+                        market=alert.market.question[:40],
+                        required=float(required_cost),
+                        available=float(current_balance),
+                    )
+                    # Save near-miss alert for visibility
+                    asyncio.create_task(self._save_insufficient_balance_alert(alert, required_cost, current_balance))
+                    return
+
+            opportunity = ArbitrageOpportunity(
+                market=alert.market,
+                yes_ask=alert.yes_ask,
+                no_ask=alert.no_ask,
+                combined_cost=alert.combined_cost,
+                profit_pct=alert.profit_pct,
+                yes_size_available=alert.yes_size_available,
+                no_size_available=alert.no_size_available,
+                max_trade_size=trade_size,
+            )
+
+            log.info(
+                "Executing with liquidity-adjusted size",
+                market=alert.market.question[:40],
+                trade_size=float(trade_size),
+                yes_liquidity=float(alert.yes_size_available),
+                no_liquidity=float(alert.no_size_available),
+                balance=float(current_balance),
+            )
+
+            # Deduct expected cost from cached balance immediately to prevent over-trading
+            async with self._balance_lock:
+                self._cached_balance -= required_cost
             try:
                 # Pass detection timestamp for latency tracking (convert to ms)
                 detection_timestamp_ms = alert.timestamp * 1000
@@ -628,11 +628,13 @@ class RealtimeArbitrageBot:
             # Fetch positions value for total portfolio tracking
             positions_value = 0.0
             try:
-                positions = await self.clob_client.get_positions()
-                for p in positions:
-                    size = float(p.get("size", 0) or 0)
-                    cur_price = float(p.get("curPrice", 0) or 0)
-                    positions_value += size * cur_price
+                async_client = await self.executor._ensure_async_client()
+                if async_client:
+                    positions = await async_client.get_positions()
+                    for p in positions:
+                        size = float(p.get("size", 0) or 0)
+                        cur_price = float(p.get("curPrice", 0) or 0)
+                        positions_value += size * cur_price
             except Exception as e:
                 log.debug("Failed to fetch positions for snapshot", error=str(e))
 
