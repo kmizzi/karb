@@ -1587,7 +1587,8 @@
                                         <tr class="timing-details" id="timing-${idx}" style="display: ${isExpanded ? 'table-row' : 'none'}; background: var(--bg-tertiary);">
                                             <td colspan="10" style="padding: 8px 16px;">
                                                 <div style="display: flex; gap: 24px; flex-wrap: wrap; font-size: 11px;">
-                                                    ${deltas.neg_risk_ms !== undefined ? `<span>🔍 Neg Risk: <b>${deltas.neg_risk_ms}ms</b></span>` : ''}
+                                                    ${deltas.warmup_ms !== undefined ? `<span>🔥 Warmup: <b>${deltas.warmup_ms}ms</b></span>` : ''}
+                                                    ${deltas.prefetch_ms !== undefined ? `<span>🔍 Prefetch: <b>${deltas.prefetch_ms}ms</b></span>` : ''}
                                                     ${deltas.sign_ms !== undefined ? `<span>✍️ Sign: <b>${deltas.sign_ms}ms</b></span>` : ''}
                                                     ${deltas.submit_ms !== undefined ? `<span>📤 Submit: <b>${deltas.submit_ms}ms</b>${deltas.yes_submit_ms !== undefined && deltas.no_submit_ms !== undefined ? ` (Y:${deltas.yes_submit_ms}/N:${deltas.no_submit_ms})` : ''}</span>` : ''}
                                                     ${deltas.total_execute_ms !== undefined ? `<span>⚡ Total: <b>${Math.round(deltas.total_execute_ms)}ms</b></span>` : ''}
